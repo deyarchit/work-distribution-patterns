@@ -1,0 +1,21 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: patterns/02-websocket-hub/Dockerfile.api
+    ports:
+      - "8080:8080"
+    environment:
+      - ADDR=:8080
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: patterns/02-websocket-hub/Dockerfile.worker
+    environment:
+      - API_URL=ws://api:8080/ws/register
+    depends_on:
+      - api
+    restart: on-failure
+    deploy:
+      replicas: 3

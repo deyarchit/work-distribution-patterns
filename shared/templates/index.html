@@ -1,0 +1,428 @@
+{{define "index.html"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work Distribution Patterns</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+      color: #f8fafc;
+    }
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 2rem;
+      font-size: 0.9rem;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .form-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .form-card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #cbd5e1;
+    }
+    .form-row {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+      flex: 1;
+      min-width: 160px;
+    }
+    label {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+    input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #e2e8f0;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #6366f1; }
+    button[type="submit"] {
+      background: #6366f1;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 0.5rem 1.5rem;
+      transition: background 0.15s;
+      align-self: flex-end;
+    }
+    button[type="submit"]:hover { background: #4f46e5; }
+    .tasks-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .tasks-header h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+    #sse-status {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+    }
+    #sse-status.connected { background: #14532d; color: #4ade80; }
+    #sse-status.disconnected { background: #450a0a; color: #f87171; }
+    #task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: #475569;
+      font-size: 0.9rem;
+    }
+
+    /* Task card */
+    .task-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.25rem;
+      transition: border-color 0.2s;
+    }
+    .task-card.running { border-color: #6366f1; }
+    .task-card.completed { border-color: #16a34a; }
+    .task-card.failed { border-color: #dc2626; }
+    .task-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .task-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .task-meta {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-top: 0.125rem;
+    }
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge.pending   { background: #1e3a5f; color: #93c5fd; }
+    .badge.running   { background: #312e81; color: #a5b4fc; }
+    .badge.completed { background: #14532d; color: #4ade80; }
+    .badge.failed    { background: #450a0a; color: #f87171; }
+
+    /* Overall progress */
+    .overall-progress {
+      height: 4px;
+      background: #0f172a;
+      border-radius: 2px;
+      margin-bottom: 1rem;
+      overflow: hidden;
+    }
+    .overall-progress-bar {
+      height: 100%;
+      background: #6366f1;
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .task-card.completed .overall-progress-bar { background: #16a34a; }
+    .task-card.failed    .overall-progress-bar { background: #dc2626; }
+
+    /* Stages */
+    .stages {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .stage-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .stage-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #334155;
+      flex-shrink: 0;
+    }
+    .stage-dot.running   { background: #6366f1; box-shadow: 0 0 6px #6366f1; }
+    .stage-dot.completed { background: #16a34a; }
+    .stage-dot.failed    { background: #dc2626; }
+    .stage-name {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      width: 110px;
+      flex-shrink: 0;
+    }
+    .stage-progress-track {
+      flex: 1;
+      height: 4px;
+      background: #0f172a;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .stage-progress-fill {
+      height: 100%;
+      background: #6366f1;
+      border-radius: 2px;
+      transition: width 0.2s ease;
+    }
+    .stage-progress-fill.completed { background: #16a34a; }
+    .stage-progress-fill.failed    { background: #dc2626; }
+    .stage-pct {
+      font-size: 0.75rem;
+      color: #64748b;
+      width: 35px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Work Distribution Patterns</h1>
+    <p class="subtitle">Live task execution visualization</p>
+
+    <div class="form-card">
+      <h2>Submit Task</h2>
+      <form
+        hx-post="/tasks"
+        hx-target="#task-list"
+        hx-swap="afterbegin"
+        hx-headers='{"Accept": "text/html"}'
+      >
+        <div class="form-row">
+          <div class="form-group">
+            <label for="name">Task Name</label>
+            <input type="text" id="name" name="name" placeholder="My task" required>
+          </div>
+          <div class="form-group">
+            <label for="stage_count">Stages (1–8)</label>
+            <input type="number" id="stage_count" name="stage_count" value="3" min="1" max="8">
+          </div>
+          <button type="submit">Submit</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="tasks-header">
+      <h2>Tasks</h2>
+      <span id="sse-status" class="disconnected">● Disconnected</span>
+    </div>
+    <div id="task-list">
+      <div class="empty-state">No tasks yet. Submit one above.</div>
+    </div>
+  </div>
+
+  <script>
+    // SSE connection
+    let es;
+
+    function connectSSE() {
+      if (es) { es.close(); }
+      es = new EventSource('/events');
+
+      es.onopen = () => {
+        const el = document.getElementById('sse-status');
+        el.textContent = '● Connected';
+        el.className = 'connected';
+      };
+
+      es.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (ev.type === 'stage_progress') {
+            handleStageProgress(ev);
+          } else if (ev.type === 'task_status') {
+            handleTaskStatus(ev);
+          }
+        } catch (err) {
+          console.error('SSE parse error:', err);
+        }
+      };
+
+      es.onerror = () => {
+        const el = document.getElementById('sse-status');
+        el.textContent = '● Disconnected';
+        el.className = 'disconnected';
+        // Reconcile UI by re-fetching tasks
+        htmx.ajax('GET', '/tasks', { target: '#task-list', swap: 'innerHTML', handler: reconcileTasks });
+        setTimeout(connectSSE, 3000);
+      };
+    }
+
+    function getOrCreateCard(taskID) {
+      let card = document.getElementById('task-' + taskID);
+      if (!card) {
+        // Card not found — fetch from server
+        fetch('/tasks/' + taskID)
+          .then(r => r.json())
+          .then(task => {
+            const list = document.getElementById('task-list');
+            const empty = list.querySelector('.empty-state');
+            if (empty) empty.remove();
+            list.insertAdjacentHTML('afterbegin', renderCard(task));
+          });
+        return null;
+      }
+      return card;
+    }
+
+    function handleStageProgress(ev) {
+      const card = document.getElementById('task-' + ev.taskID);
+      if (!card) {
+        getOrCreateCard(ev.taskID);
+        return;
+      }
+
+      // Update stage
+      const stageRow = card.querySelector('[data-stage="' + ev.stageIdx + '"]');
+      if (stageRow) {
+        const dot = stageRow.querySelector('.stage-dot');
+        const fill = stageRow.querySelector('.stage-progress-fill');
+        const pct = stageRow.querySelector('.stage-pct');
+        dot.className = 'stage-dot ' + ev.status;
+        fill.className = 'stage-progress-fill ' + (ev.status === 'completed' ? 'completed' : ev.status === 'failed' ? 'failed' : '');
+        fill.style.width = ev.progress + '%';
+        pct.textContent = ev.progress + '%';
+      }
+
+      // Update overall progress bar
+      updateOverallProgress(card);
+    }
+
+    function handleTaskStatus(ev) {
+      const card = document.getElementById('task-' + ev.taskID);
+      if (!card) {
+        getOrCreateCard(ev.taskID);
+        return;
+      }
+      card.className = 'task-card ' + ev.status;
+      const badge = card.querySelector('.badge');
+      if (badge) {
+        badge.className = 'badge ' + ev.status;
+        badge.textContent = ev.status;
+      }
+      if (ev.status === 'completed') {
+        updateOverallProgress(card);
+      }
+    }
+
+    function updateOverallProgress(card) {
+      const fills = card.querySelectorAll('.stage-progress-fill');
+      let total = 0;
+      fills.forEach(f => {
+        total += parseInt(f.style.width || '0', 10);
+      });
+      const overall = Math.round(total / fills.length);
+      const bar = card.querySelector('.overall-progress-bar');
+      if (bar) bar.style.width = overall + '%';
+    }
+
+    function renderCard(task) {
+      const stages = task.stages.map(s => `
+        <div class="stage-row" data-stage="${s.index}">
+          <div class="stage-dot ${s.status}"></div>
+          <div class="stage-name">${s.name}</div>
+          <div class="stage-progress-track">
+            <div class="stage-progress-fill ${s.status === 'completed' ? 'completed' : ''}" style="width: ${s.progress}%"></div>
+          </div>
+          <div class="stage-pct">${s.progress}%</div>
+        </div>`).join('');
+
+      const overallPct = task.stages.reduce((a, s) => a + s.progress, 0) / Math.max(task.stages.length, 1);
+
+      return `
+        <div class="task-card ${task.status}" id="task-${task.id}">
+          <div class="task-header">
+            <div>
+              <div class="task-name">${escHtml(task.name)}</div>
+              <div class="task-meta">${task.id.slice(0, 8)}… · ${new Date(task.submittedAt).toLocaleTimeString()}</div>
+            </div>
+            <span class="badge ${task.status}">${task.status}</span>
+          </div>
+          <div class="overall-progress">
+            <div class="overall-progress-bar" style="width: ${overallPct}%"></div>
+          </div>
+          <div class="stages">${stages}</div>
+        </div>`;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    connectSSE();
+  </script>
+</body>
+</html>
+{{end}}
+
+{{define "task-card"}}
+<div class="task-card {{.Status}}" id="task-{{.ID}}">
+  <div class="task-header">
+    <div>
+      <div class="task-name">{{.Name}}</div>
+      <div class="task-meta">{{printf "%.8s" .ID}}… · {{.SubmittedAt.Format "15:04:05"}}</div>
+    </div>
+    <span class="badge {{.Status}}">{{.Status}}</span>
+  </div>
+  <div class="overall-progress">
+    <div class="overall-progress-bar" style="width: 0%"></div>
+  </div>
+  <div class="stages">
+    {{range .Stages}}
+    <div class="stage-row" data-stage="{{.Index}}">
+      <div class="stage-dot {{.Status}}"></div>
+      <div class="stage-name">{{.Name}}</div>
+      <div class="stage-progress-track">
+        <div class="stage-progress-fill {{if eq .Status "completed"}}completed{{end}}" style="width: {{.Progress}}%"></div>
+      </div>
+      <div class="stage-pct">{{.Progress}}%</div>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

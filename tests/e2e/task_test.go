@@ -1,0 +1,150 @@
+package e2e_test
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+)
+
+// TestSingleTask verifies a 3-stage task runs all stages to completion.
+func TestSingleTask(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	events := SSEClient(ctx, t)
+
+	id := postTask(t, "e2e-single", 3)
+	t.Logf("submitted task %s", id)
+
+	stageCompleted := make(map[int]bool)
+	taskDone := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timeout: stages completed=%v, taskDone=%v", stageCompleted, taskDone)
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("SSE stream closed unexpectedly")
+			}
+			if ev.TaskID != id {
+				continue
+			}
+			if ev.Type == "stage_progress" && ev.Status == "completed" && ev.Progress == 100 {
+				stageCompleted[ev.StageIdx] = true
+				t.Logf("stage %d completed", ev.StageIdx)
+			}
+			if ev.Type == "task_status" && ev.Status == "completed" {
+				taskDone = true
+				t.Log("task completed")
+			}
+			if taskDone && len(stageCompleted) == 3 {
+				return
+			}
+		}
+	}
+}
+
+// TestConcurrentTasks submits 5 tasks simultaneously and asserts all complete.
+func TestConcurrentTasks(t *testing.T) {
+	const numTasks = 5
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	events := SSEClient(ctx, t)
+
+	ids := make([]string, numTasks)
+	for i := range ids {
+		ids[i] = postTask(t, "e2e-concurrent", 3)
+	}
+	t.Logf("submitted %d tasks: %v", numTasks, ids)
+
+	idSet := make(map[string]bool)
+	for _, id := range ids {
+		idSet[id] = true
+	}
+
+	completed := make(map[string]bool)
+	var mu sync.Mutex
+
+	for {
+		select {
+		case <-ctx.Done():
+			mu.Lock()
+			t.Fatalf("timeout: only %d/%d tasks completed", len(completed), numTasks)
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("SSE stream closed unexpectedly")
+			}
+			if !idSet[ev.TaskID] {
+				continue
+			}
+			if ev.Type == "task_status" && ev.Status == "completed" {
+				mu.Lock()
+				completed[ev.TaskID] = true
+				done := len(completed)
+				mu.Unlock()
+				t.Logf("task %s completed (%d/%d)", ev.TaskID, done, numTasks)
+				if done == numTasks {
+					return
+				}
+			}
+		}
+	}
+}
+
+// TestStatusTransitions verifies the task goes through pending → running → completed.
+func TestStatusTransitions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	events := SSEClient(ctx, t)
+
+	id := postTask(t, "e2e-transitions", 2)
+	t.Logf("submitted task %s", id)
+
+	// Immediately check pending
+	task := getTask(t, id)
+	if task.Status != "pending" && task.Status != "running" {
+		t.Errorf("expected pending or running immediately after submit, got %s", task.Status)
+	}
+
+	seenRunning := false
+	seenCompleted := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timeout: seenRunning=%v seenCompleted=%v", seenRunning, seenCompleted)
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("SSE stream closed")
+			}
+			if ev.TaskID != id {
+				continue
+			}
+			if ev.Type == "task_status" && ev.Status == "running" {
+				seenRunning = true
+				t.Log("saw running status")
+				// Poll store
+				task := getTask(t, id)
+				if task.Status != "running" && task.Status != "completed" {
+					t.Errorf("store status mismatch: got %s", task.Status)
+				}
+			}
+			if ev.Type == "task_status" && ev.Status == "completed" {
+				seenCompleted = true
+				t.Log("saw completed status")
+				task := getTask(t, id)
+				if task.Status != "completed" {
+					t.Errorf("expected store status=completed, got %s", task.Status)
+				}
+				if !seenRunning {
+					t.Error("completed without seeing running transition")
+				}
+				return
+			}
+		}
+	}
+}
