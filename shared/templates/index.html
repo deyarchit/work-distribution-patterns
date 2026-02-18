@@ -231,7 +231,6 @@
         hx-post="/tasks"
         hx-target="#task-list"
         hx-swap="afterbegin"
-        hx-headers='{"Accept": "text/html"}'
       >
         <div class="form-row">
           <div class="form-group">
@@ -257,11 +256,11 @@
   </div>
 
   <script>
-    // SSE connection
+    // ── SSE ──────────────────────────────────────────────────────────────────
     let es;
 
     function connectSSE() {
-      if (es) { es.close(); }
+      if (es) es.close();
       es = new EventSource('/events');
 
       es.onopen = () => {
@@ -273,125 +272,98 @@
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data);
-          if (ev.type === 'stage_progress') {
-            handleStageProgress(ev);
-          } else if (ev.type === 'task_status') {
-            handleTaskStatus(ev);
-          }
-        } catch (err) {
-          console.error('SSE parse error:', err);
-        }
+          if (ev.type === 'stage_progress') handleStageProgress(ev);
+          else if (ev.type === 'task_status')  handleTaskStatus(ev);
+        } catch (err) { console.error('SSE parse error:', err); }
       };
 
       es.onerror = () => {
         const el = document.getElementById('sse-status');
         el.textContent = '● Disconnected';
         el.className = 'disconnected';
-        // Reconcile UI by re-fetching tasks
-        htmx.ajax('GET', '/tasks', { target: '#task-list', swap: 'innerHTML', handler: reconcileTasks });
+        // Just reconnect. Do NOT touch #task-list here — htmx.ajax with a
+        // JSON response would wipe existing cards and create the duplicate bug.
+        es.close();
         setTimeout(connectSSE, 3000);
       };
     }
 
-    function getOrCreateCard(taskID) {
-      let card = document.getElementById('task-' + taskID);
-      if (!card) {
-        // Card not found — fetch from server
-        fetch('/tasks/' + taskID)
-          .then(r => r.json())
-          .then(task => {
-            const list = document.getElementById('task-list');
-            const empty = list.querySelector('.empty-state');
-            if (empty) empty.remove();
-            list.insertAdjacentHTML('afterbegin', renderCard(task));
-          });
-        return null;
-      }
-      return card;
-    }
+    // ── SSE handlers — UPDATE ONLY, never create cards ───────────────────────
+    // Cards are created exclusively by HTMX from the POST /tasks response.
+    // If a card isn't in the DOM yet (SSE arrived before HTMX response),
+    // we simply skip — htmx:afterSwap will sync state once HTMX inserts it.
 
     function handleStageProgress(ev) {
       const card = document.getElementById('task-' + ev.taskID);
-      if (!card) {
-        getOrCreateCard(ev.taskID);
-        return;
-      }
+      if (!card) return;
 
-      // Update stage
-      const stageRow = card.querySelector('[data-stage="' + ev.stageIdx + '"]');
-      if (stageRow) {
-        const dot = stageRow.querySelector('.stage-dot');
-        const fill = stageRow.querySelector('.stage-progress-fill');
-        const pct = stageRow.querySelector('.stage-pct');
-        dot.className = 'stage-dot ' + ev.status;
-        fill.className = 'stage-progress-fill ' + (ev.status === 'completed' ? 'completed' : ev.status === 'failed' ? 'failed' : '');
+      const row = card.querySelector('[data-stage="' + ev.stageIdx + '"]');
+      if (row) {
+        row.querySelector('.stage-dot').className = 'stage-dot ' + ev.status;
+        const fill = row.querySelector('.stage-progress-fill');
+        fill.className = 'stage-progress-fill' +
+          (ev.status === 'completed' ? ' completed' : ev.status === 'failed' ? ' failed' : '');
         fill.style.width = ev.progress + '%';
-        pct.textContent = ev.progress + '%';
+        row.querySelector('.stage-pct').textContent = ev.progress + '%';
       }
-
-      // Update overall progress bar
       updateOverallProgress(card);
     }
 
     function handleTaskStatus(ev) {
       const card = document.getElementById('task-' + ev.taskID);
-      if (!card) {
-        getOrCreateCard(ev.taskID);
-        return;
-      }
+      if (!card) return;
+
       card.className = 'task-card ' + ev.status;
       const badge = card.querySelector('.badge');
-      if (badge) {
-        badge.className = 'badge ' + ev.status;
-        badge.textContent = ev.status;
-      }
-      if (ev.status === 'completed') {
-        updateOverallProgress(card);
-      }
+      if (badge) { badge.className = 'badge ' + ev.status; badge.textContent = ev.status; }
+      updateOverallProgress(card);
     }
 
+    // ── After HTMX inserts a card, sync its state from the server ────────────
+    // This handles the race where the task completes (or progresses) before the
+    // POST /tasks HTTP response arrives and HTMX inserts the card.
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+      if (!evt.detail.target || evt.detail.target.id !== 'task-list') return;
+      // The newly inserted card is always first (hx-swap="afterbegin").
+      const first = evt.detail.target.firstElementChild;
+      if (!first || !first.id.startsWith('task-')) return;
+      syncCardState(first.id.replace('task-', ''));
+    });
+
+    // Fetch current task state from server and apply it to the card.
+    function syncCardState(taskID) {
+      fetch('/tasks/' + taskID)
+        .then(r => r.json())
+        .then(task => {
+          const card = document.getElementById('task-' + taskID);
+          if (!card) return;
+          // Status + badge
+          card.className = 'task-card ' + task.status;
+          const badge = card.querySelector('.badge');
+          if (badge) { badge.className = 'badge ' + task.status; badge.textContent = task.status; }
+          // Stages
+          (task.stages || []).forEach(s => {
+            const row = card.querySelector('[data-stage="' + s.index + '"]');
+            if (!row) return;
+            row.querySelector('.stage-dot').className = 'stage-dot ' + s.status;
+            const fill = row.querySelector('.stage-progress-fill');
+            fill.className = 'stage-progress-fill' +
+              (s.status === 'completed' ? ' completed' : s.status === 'failed' ? ' failed' : '');
+            fill.style.width = s.progress + '%';
+            row.querySelector('.stage-pct').textContent = s.progress + '%';
+          });
+          updateOverallProgress(card);
+        });
+    }
+
+    // ── Utilities ────────────────────────────────────────────────────────────
     function updateOverallProgress(card) {
       const fills = card.querySelectorAll('.stage-progress-fill');
+      if (!fills.length) return;
       let total = 0;
-      fills.forEach(f => {
-        total += parseInt(f.style.width || '0', 10);
-      });
-      const overall = Math.round(total / fills.length);
+      fills.forEach(f => { total += parseInt(f.style.width || '0', 10); });
       const bar = card.querySelector('.overall-progress-bar');
-      if (bar) bar.style.width = overall + '%';
-    }
-
-    function renderCard(task) {
-      const stages = task.stages.map(s => `
-        <div class="stage-row" data-stage="${s.index}">
-          <div class="stage-dot ${s.status}"></div>
-          <div class="stage-name">${s.name}</div>
-          <div class="stage-progress-track">
-            <div class="stage-progress-fill ${s.status === 'completed' ? 'completed' : ''}" style="width: ${s.progress}%"></div>
-          </div>
-          <div class="stage-pct">${s.progress}%</div>
-        </div>`).join('');
-
-      const overallPct = task.stages.reduce((a, s) => a + s.progress, 0) / Math.max(task.stages.length, 1);
-
-      return `
-        <div class="task-card ${task.status}" id="task-${task.id}">
-          <div class="task-header">
-            <div>
-              <div class="task-name">${escHtml(task.name)}</div>
-              <div class="task-meta">${task.id.slice(0, 8)}… · ${new Date(task.submittedAt).toLocaleTimeString()}</div>
-            </div>
-            <span class="badge ${task.status}">${task.status}</span>
-          </div>
-          <div class="overall-progress">
-            <div class="overall-progress-bar" style="width: ${overallPct}%"></div>
-          </div>
-          <div class="stages">${stages}</div>
-        </div>`;
-    }
-
-    function escHtml(s) {
-      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      if (bar) bar.style.width = Math.round(total / fills.length) + '%';
     }
 
     connectSSE();

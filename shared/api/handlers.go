@@ -73,8 +73,10 @@ func SubmitTask(taskStore store.TaskStore, d dispatch.Dispatcher) echo.HandlerFu
 			return err
 		}
 
-		// Return HTML fragment if client is HTMX
-		if c.Request().Header.Get("Accept") == "text/html" {
+		// Return HTML fragment for HTMX requests; JSON for everything else.
+		// HX-Request: true is always present on HTMX requests — more reliable
+		// than checking the Accept header, which HTMX may not set exactly.
+		if c.Request().Header.Get("HX-Request") == "true" {
 			tpl := c.Get("template").(*template.Template)
 			c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 			return tpl.ExecuteTemplate(c.Response().Writer, "task-card", task)
