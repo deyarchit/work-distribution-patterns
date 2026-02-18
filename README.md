@@ -27,7 +27,7 @@ make run-p1
 # Submit a task via curl
 curl -X POST localhost:8080/tasks \
   -H "Content-Type: application/json" \
-  -d '{"name":"hello","stage_count":3,"stage_duration_secs":2}'
+  -d '{"name":"hello","stage_count":3}'
 
 # Stream SSE events
 curl -N localhost:8080/events
@@ -75,7 +75,7 @@ Progress always terminates at `sse.Hub.Publish()` — the SSE layer never change
 ## API Contract
 
 ```
-POST /tasks          {"name", "stage_count" (1-8), "stage_duration_secs"}
+POST /tasks          {"name", "stage_count" (1-8, default 3)}
                      → 202 {"id":"..."}
 GET  /tasks          → []Task
 GET  /tasks/{id}     → Task
@@ -120,9 +120,55 @@ patterns/
 └── 03-nats-jetstream/    NATS JetStream + KV for full distribution
 ```
 
+## Environment Variables
+
+<!-- AUTO-GENERATED from patterns/*/cmd/*/main.go -->
+
+### Pattern 1 — Goroutine Pool (`patterns/01-goroutine-pool/cmd/server`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADDR` | `:8080` | Listen address |
+| `WORKERS` | `5` | Goroutine pool size |
+| `QUEUE_SIZE` | `20` | Max queued tasks before HTTP 429 |
+| `STAGE_DURATION_SECS` | `3` | Seconds per stage |
+
+### Pattern 2 — WebSocket Hub
+
+API (`patterns/02-websocket-hub/cmd/api`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADDR` | `:8080` | Listen address |
+
+Worker (`patterns/02-websocket-hub/cmd/worker`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `API_URL` | `ws://localhost:8080/ws/register` | API WebSocket endpoint |
+| `STAGE_DURATION_SECS` | `3` | Seconds per stage |
+
+### Pattern 3 — NATS JetStream
+
+API (`patterns/03-nats-jetstream/cmd/api`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADDR` | `:8080` | Listen address |
+| `NATS_URL` | `nats://127.0.0.1:4222` | NATS server URL |
+
+Worker (`patterns/03-nats-jetstream/cmd/worker`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `NATS_URL` | `nats://127.0.0.1:4222` | NATS server URL |
+| `STAGE_DURATION_SECS` | `3` | Seconds per stage |
+
+<!-- END AUTO-GENERATED -->
+
 ## Key Design Decisions
 
 - **`dispatch.Dispatcher`** is the only seam between HTTP and execution — `shared/api` never imports pattern-specific code.
-- **Stage duration** (`StageDurationSecs`) is part of the task, not an interface parameter — it flows through naturally.
+- **Stage duration** is controlled by the `STAGE_DURATION_SECS` environment variable on each server/worker process — it is not part of the task payload.
 - **`sse.Hub`** satisfies `executor.ProgressSink` directly in Pattern 1; Patterns 2/3 use adapter types.
 - **Pattern 3** has all API replicas subscribe to NATS Core progress subjects, so any replica can serve any SSE client — no sticky sessions.
