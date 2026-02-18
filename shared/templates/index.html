@@ -248,7 +248,7 @@
 
     <div class="tasks-header">
       <h2>Tasks</h2>
-      <span id="sse-status" class="disconnected">● Disconnected</span>
+      <span id="sse-status" class="connected">● Ready</span>
     </div>
     <div id="task-list">
       <div class="empty-state">No tasks yet. Submit one above.</div>
@@ -256,19 +256,13 @@
   </div>
 
   <script>
-    // ── SSE ──────────────────────────────────────────────────────────────────
-    let es;
+    // ── Per-task SSE connections ──────────────────────────────────────────────
+    const taskConnections = new Map();
 
-    function connectSSE() {
-      if (es) es.close();
-      es = new EventSource('/events');
-
-      es.onopen = () => {
-        const el = document.getElementById('sse-status');
-        el.textContent = '● Connected';
-        el.className = 'connected';
-      };
-
+    function openTaskSSE(taskID) {
+      if (taskConnections.has(taskID)) return;
+      const es = new EventSource('/events?taskID=' + encodeURIComponent(taskID));
+      es.onopen = () => updateSSEStatus(true);
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data);
@@ -276,16 +270,29 @@
           else if (ev.type === 'task_status')  handleTaskStatus(ev);
         } catch (err) { console.error('SSE parse error:', err); }
       };
+      es.onerror = () => updateSSEStatus(taskConnections.size > 0);
+      taskConnections.set(taskID, es);
+    }
 
-      es.onerror = () => {
+    function closeTaskSSE(taskID) {
+      const es = taskConnections.get(taskID);
+      if (!es) return;
+      es.close();
+      taskConnections.delete(taskID);
+      if (taskConnections.size > 0) {
+        updateSSEStatus(true);
+      } else {
+        // All tasks done — not an error, show ready
         const el = document.getElementById('sse-status');
-        el.textContent = '● Disconnected';
-        el.className = 'disconnected';
-        // Just reconnect. Do NOT touch #task-list here — htmx.ajax with a
-        // JSON response would wipe existing cards and create the duplicate bug.
-        es.close();
-        setTimeout(connectSSE, 3000);
-      };
+        if (el) { el.textContent = '● Ready'; el.className = 'connected'; }
+      }
+    }
+
+    function updateSSEStatus(connected) {
+      const el = document.getElementById('sse-status');
+      if (!el) return;
+      el.textContent = connected ? '● Connected' : '● Disconnected';
+      el.className = connected ? 'connected' : 'disconnected';
     }
 
     // ── SSE handlers — UPDATE ONLY, never create cards ───────────────────────
@@ -296,7 +303,6 @@
     function handleStageProgress(ev) {
       const card = document.getElementById('task-' + ev.taskID);
       if (!card) return;
-
       const row = card.querySelector('[data-stage="' + ev.stageIdx + '"]');
       if (row) {
         row.querySelector('.stage-dot').className = 'stage-dot ' + ev.status;
@@ -312,22 +318,23 @@
     function handleTaskStatus(ev) {
       const card = document.getElementById('task-' + ev.taskID);
       if (!card) return;
-
       card.className = 'task-card ' + ev.status;
       const badge = card.querySelector('.badge');
       if (badge) { badge.className = 'badge ' + ev.status; badge.textContent = ev.status; }
       updateOverallProgress(card);
+      if (ev.status === 'completed' || ev.status === 'failed') {
+        closeTaskSSE(ev.taskID);
+      }
     }
 
-    // ── After HTMX inserts a card, sync its state from the server ────────────
-    // This handles the race where the task completes (or progresses) before the
-    // POST /tasks HTTP response arrives and HTMX inserts the card.
+    // ── After HTMX inserts a card, open a scoped SSE connection ──────────────
     document.body.addEventListener('htmx:afterSwap', function(evt) {
       if (!evt.detail.target || evt.detail.target.id !== 'task-list') return;
-      // The newly inserted card is always first (hx-swap="afterbegin").
       const first = evt.detail.target.firstElementChild;
       if (!first || !first.id.startsWith('task-')) return;
-      syncCardState(first.id.replace('task-', ''));
+      const taskID = first.id.replace('task-', '');
+      openTaskSSE(taskID);
+      syncCardState(taskID);
     });
 
     // Fetch current task state from server and apply it to the card.
@@ -337,11 +344,9 @@
         .then(task => {
           const card = document.getElementById('task-' + taskID);
           if (!card) return;
-          // Status + badge
           card.className = 'task-card ' + task.status;
           const badge = card.querySelector('.badge');
           if (badge) { badge.className = 'badge ' + task.status; badge.textContent = task.status; }
-          // Stages
           (task.stages || []).forEach(s => {
             const row = card.querySelector('[data-stage="' + s.index + '"]');
             if (!row) return;
@@ -353,6 +358,9 @@
             row.querySelector('.stage-pct').textContent = s.progress + '%';
           });
           updateOverallProgress(card);
+          if (task.status === 'completed' || task.status === 'failed') {
+            closeTaskSSE(taskID);
+          }
         });
     }
 
@@ -365,8 +373,7 @@
       const bar = card.querySelector('.overall-progress-bar');
       if (bar) bar.style.width = Math.round(total / fills.length) + '%';
     }
-
-    connectSSE();
+    // No connectSSE() call — connections are opened per-task via htmx:afterSwap
   </script>
 </body>
 </html>

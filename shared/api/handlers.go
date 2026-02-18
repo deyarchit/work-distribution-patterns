@@ -118,7 +118,8 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 		c.Response().Header().Set("X-Accel-Buffering", "no")
 		c.Response().WriteHeader(http.StatusOK)
 
-		ch, unsub := hub.Subscribe()
+		taskID := c.QueryParam("taskID")
+		ch, unsub := hub.Subscribe(taskID)
 		defer unsub()
 
 		// Send a comment to flush headers immediately

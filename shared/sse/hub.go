@@ -10,58 +10,76 @@ import (
 type sseEvent struct {
 	Type string `json:"type"`
 	// For stage_progress events
-	TaskID    string            `json:"taskID,omitempty"`
-	StageIdx  int               `json:"stageIdx,omitempty"`
-	StageName string            `json:"stageName,omitempty"`
-	Progress  int               `json:"progress,omitempty"`
+	TaskID    string             `json:"taskID,omitempty"`
+	StageIdx  int                `json:"stageIdx,omitempty"`
+	StageName string             `json:"stageName,omitempty"`
+	Progress  int                `json:"progress,omitempty"`
 	Status    models.StageStatus `json:"status,omitempty"`
 	// For task_status events (Status field reused as string below via separate struct)
 }
 
 type taskStatusEvent struct {
-	Type   string           `json:"type"`
-	TaskID string           `json:"taskID"`
+	Type   string            `json:"type"`
+	TaskID string            `json:"taskID"`
 	Status models.TaskStatus `json:"status"`
 }
 
 type stageProgressEvent struct {
-	Type      string            `json:"type"`
-	TaskID    string            `json:"taskID"`
-	StageIdx  int               `json:"stageIdx"`
-	StageName string            `json:"stageName"`
-	Progress  int               `json:"progress"`
+	Type      string             `json:"type"`
+	TaskID    string             `json:"taskID"`
+	StageIdx  int                `json:"stageIdx"`
+	StageName string             `json:"stageName"`
+	Progress  int                `json:"progress"`
 	Status    models.StageStatus `json:"status"`
 }
 
-// Hub manages SSE subscribers and broadcasts events to all of them.
+// Hub manages SSE subscribers and broadcasts events to task-scoped or global subscribers.
 type Hub struct {
-	mu          sync.Mutex
-	subscribers map[chan []byte]struct{}
+	mu         sync.Mutex
+	taskSubs   map[string]map[chan []byte]struct{} // taskID → subscribers
+	globalSubs map[chan []byte]struct{}             // taskID="" → all events
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		subscribers: make(map[chan []byte]struct{}),
+		taskSubs:   make(map[string]map[chan []byte]struct{}),
+		globalSubs: make(map[chan []byte]struct{}),
 	}
 }
 
 // Subscribe returns a buffered channel that receives SSE event bytes and an
 // unsubscribe function. The caller must call unsubscribe when done.
-func (h *Hub) Subscribe() (chan []byte, func()) {
+// If taskID is empty, the subscriber receives all events (global subscription).
+// Otherwise, the subscriber only receives events for the specified task.
+func (h *Hub) Subscribe(taskID string) (chan []byte, func()) {
 	ch := make(chan []byte, 64)
 	h.mu.Lock()
-	h.subscribers[ch] = struct{}{}
+	if taskID == "" {
+		h.globalSubs[ch] = struct{}{}
+	} else {
+		if h.taskSubs[taskID] == nil {
+			h.taskSubs[taskID] = make(map[chan []byte]struct{})
+		}
+		h.taskSubs[taskID][ch] = struct{}{}
+	}
 	h.mu.Unlock()
 
 	unsub := func() {
 		h.mu.Lock()
-		delete(h.subscribers, ch)
+		if taskID == "" {
+			delete(h.globalSubs, ch)
+		} else {
+			delete(h.taskSubs[taskID], ch)
+			if len(h.taskSubs[taskID]) == 0 {
+				delete(h.taskSubs, taskID) // reclaim map entry
+			}
+		}
 		h.mu.Unlock()
 	}
 	return ch, unsub
 }
 
-// Publish broadcasts a stage progress event to all subscribers.
+// Publish broadcasts a stage progress event to task-scoped and global subscribers.
 func (h *Hub) Publish(event models.ProgressEvent) {
 	ev := stageProgressEvent{
 		Type:      "stage_progress",
@@ -75,10 +93,10 @@ func (h *Hub) Publish(event models.ProgressEvent) {
 	if err != nil {
 		return
 	}
-	h.broadcast(data)
+	h.broadcast(event.TaskID, data)
 }
 
-// PublishTaskStatus broadcasts a task status change event to all subscribers.
+// PublishTaskStatus broadcasts a task status change event to task-scoped and global subscribers.
 func (h *Hub) PublishTaskStatus(taskID string, status models.TaskStatus) {
 	ev := taskStatusEvent{
 		Type:   "task_status",
@@ -89,17 +107,22 @@ func (h *Hub) PublishTaskStatus(taskID string, status models.TaskStatus) {
 	if err != nil {
 		return
 	}
-	h.broadcast(data)
+	h.broadcast(taskID, data)
 }
 
-func (h *Hub) broadcast(data []byte) {
+func (h *Hub) broadcast(taskID string, data []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for ch := range h.subscribers {
+	for ch := range h.taskSubs[taskID] { // range over nil map is safe in Go
+		select {
+		case ch <- data:
+		default: // drop slow consumer
+		}
+	}
+	for ch := range h.globalSubs {
 		select {
 		case ch <- data:
 		default:
-			// slow consumer — drop the event rather than blocking
 		}
 	}
 }

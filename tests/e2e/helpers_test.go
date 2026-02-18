@@ -56,12 +56,18 @@ type SSEEvent struct {
 }
 
 // SSEClient connects to the /events endpoint and emits parsed events on a channel.
+// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
+// If taskID is empty, connects to /events for global delivery (all tasks).
 // Returns when ctx is cancelled or the connection drops.
-func SSEClient(ctx context.Context, t *testing.T) <-chan SSEEvent {
+func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent {
 	t.Helper()
 	ch := make(chan SSEEvent, 256)
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL()+"/events", nil)
+	url := baseURL() + "/events"
+	if taskID != "" {
+		url += "?taskID=" + taskID
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Logf("SSE connect error: %v", err)

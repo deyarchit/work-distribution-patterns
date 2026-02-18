@@ -12,10 +12,10 @@ func TestSingleTask(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	events := SSEClient(ctx, t)
-
 	id := postTask(t, "e2e-single", 3)
 	t.Logf("submitted task %s", id)
+
+	events := SSEClient(ctx, t, id)
 
 	stageCompleted := make(map[int]bool)
 	taskDone := false
@@ -27,9 +27,6 @@ func TestSingleTask(t *testing.T) {
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed unexpectedly")
-			}
-			if ev.TaskID != id {
-				continue
 			}
 			if ev.Type == "stage_progress" && ev.Status == "completed" && ev.Progress == 100 {
 				stageCompleted[ev.StageIdx] = true
@@ -52,13 +49,34 @@ func TestConcurrentTasks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	events := SSEClient(ctx, t)
-
+	// Submit all tasks first, then open per-task SSE connections.
 	ids := make([]string, numTasks)
 	for i := range ids {
 		ids[i] = postTask(t, "e2e-concurrent", 3)
 	}
 	t.Logf("submitted %d tasks: %v", numTasks, ids)
+
+	// Fan-in all per-task SSE streams into a single merged channel.
+	merged := make(chan SSEEvent, 256)
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(taskID string) {
+			defer wg.Done()
+			ch := SSEClient(ctx, t, taskID)
+			for ev := range ch {
+				select {
+				case merged <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(id)
+	}
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
 
 	idSet := make(map[string]bool)
 	for _, id := range ids {
@@ -73,7 +91,7 @@ func TestConcurrentTasks(t *testing.T) {
 		case <-ctx.Done():
 			mu.Lock()
 			t.Fatalf("timeout: only %d/%d tasks completed", len(completed), numTasks)
-		case ev, ok := <-events:
+		case ev, ok := <-merged:
 			if !ok {
 				t.Fatal("SSE stream closed unexpectedly")
 			}
@@ -99,8 +117,6 @@ func TestStatusTransitions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	events := SSEClient(ctx, t)
-
 	id := postTask(t, "e2e-transitions", 2)
 	t.Logf("submitted task %s", id)
 
@@ -109,6 +125,8 @@ func TestStatusTransitions(t *testing.T) {
 	if task.Status != "pending" && task.Status != "running" {
 		t.Errorf("expected pending or running immediately after submit, got %s", task.Status)
 	}
+
+	events := SSEClient(ctx, t, id)
 
 	seenRunning := false
 	seenCompleted := false
@@ -120,9 +138,6 @@ func TestStatusTransitions(t *testing.T) {
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed")
-			}
-			if ev.TaskID != id {
-				continue
 			}
 			if ev.Type == "task_status" && ev.Status == "running" {
 				seenRunning = true
