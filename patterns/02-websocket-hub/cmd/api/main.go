@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
@@ -44,9 +43,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		workerID := uuid.New().String()[:8]
-		log.Printf("worker %s connected", workerID)
-		workerHub.Register(conn, workerID)
+		workerHub.Register(conn)
 		return nil
 	})
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"work-distribution-patterns/shared/models"
@@ -44,9 +45,10 @@ func NewWorkerHub(sseHub *sse.Hub, taskStore store.TaskStore) *WorkerHub {
 }
 
 // Register adds a new worker connection and starts its read/write pumps.
-func (h *WorkerHub) Register(conn *websocket.Conn, id string) *WorkerConn {
+// A unique worker ID is generated internally.
+func (h *WorkerHub) Register(conn *websocket.Conn) *WorkerConn {
 	wc := &WorkerConn{
-		id:   id,
+		id:   uuid.New().String()[:8],
 		conn: conn,
 		send: make(chan []byte, 64),
 		hub:  h,
@@ -55,6 +57,7 @@ func (h *WorkerHub) Register(conn *websocket.Conn, id string) *WorkerConn {
 	h.workers = append(h.workers, wc)
 	h.mu.Unlock()
 
+	log.Printf("worker %s connected", wc.id)
 	go wc.writePump()
 	go wc.readPump()
 	return wc

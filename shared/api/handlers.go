@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"work-distribution-patterns/shared/dispatch"
@@ -18,11 +17,6 @@ import (
 type submitRequest struct {
 	Name       string `json:"name"        form:"name"`
 	StageCount int    `json:"stage_count" form:"stage_count"`
-}
-
-var stageNames = []string{
-	"Initialization", "Validation", "Processing", "Transformation",
-	"Aggregation", "Optimization", "Finalization", "Cleanup",
 }
 
 // SubmitTask handles POST /tasks.
@@ -39,31 +33,8 @@ func SubmitTask(manager dispatch.TaskManager) echo.HandlerFunc {
 		if req.StageCount < 1 {
 			req.StageCount = 3
 		}
-		if req.StageCount > 8 {
-			req.StageCount = 8
-		}
 
-		stages := make([]models.Stage, req.StageCount)
-		for i := 0; i < req.StageCount; i++ {
-			name := fmt.Sprintf("Stage %d", i+1)
-			if i < len(stageNames) {
-				name = stageNames[i]
-			}
-			stages[i] = models.Stage{
-				Index:    i,
-				Name:     name,
-				Status:   models.StagePending,
-				Progress: 0,
-			}
-		}
-
-		task := models.Task{
-			ID:          uuid.New().String(),
-			Name:        req.Name,
-			Status:      models.TaskPending,
-			SubmittedAt: time.Now(),
-			Stages:      stages,
-		}
+		task := models.NewTask(req.Name, req.StageCount)
 
 		if err := manager.Submit(c.Request().Context(), task); err != nil {
 			return err

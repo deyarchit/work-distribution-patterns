@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"html/template"
 	"log"
 	"os"
@@ -10,7 +9,6 @@ import (
 
 	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
 	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
@@ -46,29 +44,10 @@ func main() {
 
 	hub       := sse.NewHub()
 	taskStore := natsinternal.NewJetStreamStore(kv)
-	manager   := natsinternal.NewNATSTaskManager(js, taskStore)
-
-	// Subscribe to all progress events on NATS Core and forward to SSE hub.
-	// Every API replica does this, so all SSE hubs receive all events regardless
-	// of which replica the browser is connected to — no sticky sessions needed.
-	nc.Subscribe("progress.*", func(msg *nats.Msg) {
-		var ev models.ProgressEvent
-		if err := json.Unmarshal(msg.Data, &ev); err == nil {
-			hub.Publish(ev)
-		}
-	})
-	// task_status.* events carry terminal and intermediate status from workers.
-	// Both the SSE hub and the task store are updated here; workers never touch the store.
-	nc.Subscribe("task_status.*", func(msg *nats.Msg) {
-		var payload struct {
-			TaskID string            `json:"taskID"`
-			Status models.TaskStatus `json:"status"`
-		}
-		if err := json.Unmarshal(msg.Data, &payload); err == nil {
-			hub.PublishTaskStatus(payload.TaskID, payload.Status)
-			_ = taskStore.SetStatus(payload.TaskID, payload.Status)
-		}
-	})
+	manager, err := natsinternal.NewNATSTaskManager(nc, js, taskStore, hub)
+	if err != nil {
+		log.Fatalf("nats manager: %v", err)
+	}
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
