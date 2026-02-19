@@ -66,16 +66,12 @@ func main() {
 		log.Printf("setup warning: %v", err)
 	}
 
-	kv, err := js.KeyValue(natsinternal.KVBucket)
-	if err != nil {
-		log.Fatalf("open KV: %v", err)
-	}
+	sink := &natsSink{nc: nc}
+	exec := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
 
-	taskStore := natsinternal.NewJetStreamStore(kv)
-	sink      := &natsSink{nc: nc}
-	exec      := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
-
-	// Durable queue subscriber — one message delivered to exactly one worker
+	// Durable queue subscriber — one message delivered to exactly one worker.
+	// The worker reports status via natsSink (NATS Core); the API-side task_status.*
+	// subscription is responsible for persisting status to the store.
 	sub, err := js.QueueSubscribe(
 		"tasks.new",
 		natsinternal.ConsumerDur,
@@ -88,13 +84,7 @@ func main() {
 			}
 			log.Printf("executing task %s (%s, %d stages)", task.ID, task.Name, len(task.Stages))
 
-			// Update status to running in KV
-			taskStore.SetStatus(task.ID, models.TaskRunning)
-
 			exec.Run(context.Background(), task, sink)
-
-			// Update final status in KV
-			taskStore.SetStatus(task.ID, models.TaskCompleted)
 
 			// ACK only after full completion — crash before ACK → redelivery
 			msg.Ack()

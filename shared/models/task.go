@@ -42,10 +42,3 @@ type ProgressEvent struct {
 	Progress  int         `json:"progress"`
 	Status    StageStatus `json:"status"`
 }
-
-// TaskAssignment is the wire type used in Pattern 2 (API → worker over WebSocket).
-type TaskAssignment struct {
-	TaskID     string `json:"taskId"`
-	Name       string `json:"name"`
-	StageCount int    `json:"stageCount"`
-}

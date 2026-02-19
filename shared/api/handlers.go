@@ -26,7 +26,8 @@ var stageNames = []string{
 }
 
 // SubmitTask handles POST /tasks.
-func SubmitTask(taskStore store.TaskStore, d dispatch.Dispatcher) echo.HandlerFunc {
+// The task manager is responsible for persisting the task and dispatching it.
+func SubmitTask(manager dispatch.TaskManager) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		var req submitRequest
 		if err := c.Bind(&req); err != nil {
@@ -64,18 +65,11 @@ func SubmitTask(taskStore store.TaskStore, d dispatch.Dispatcher) echo.HandlerFu
 			Stages:      stages,
 		}
 
-		if err := taskStore.Create(task); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
-
-		if err := d.Submit(c.Request().Context(), task); err != nil {
-			// Pattern-specific errors bubble up as HTTP status
+		if err := manager.Submit(c.Request().Context(), task); err != nil {
 			return err
 		}
 
 		// Return HTML fragment for HTMX requests; JSON for everything else.
-		// HX-Request: true is always present on HTMX requests — more reliable
-		// than checking the Accept header, which HTMX may not set exactly.
 		if c.Request().Header.Get("HX-Request") == "true" {
 			tpl := c.Get("template").(*template.Template)
 			c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")

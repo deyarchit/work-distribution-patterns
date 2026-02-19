@@ -16,25 +16,25 @@ import (
 )
 
 func main() {
-	addr          := envOr("ADDR", ":8080")
-	workers       := envInt("WORKERS", 5)
-	queueSize     := envInt("QUEUE_SIZE", 20)
-	stageDurSecs  := envInt("STAGE_DURATION_SECS", 3)
+	addr         := envOr("ADDR", ":8080")
+	workers      := envInt("WORKERS", 5)
+	queueSize    := envInt("QUEUE_SIZE", 20)
+	stageDurSecs := envInt("STAGE_DURATION_SECS", 3)
 
-	hub := sse.NewHub()
+	hub       := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	exec := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
-	p := pool.New(workers, queueSize)
+	exec      := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
+	p         := pool.New(workers, queueSize)
 	defer p.Stop()
 
-	dispatcher := pool.NewPoolDispatcher(p, hub, exec, taskStore)
+	manager := pool.NewPoolTaskManager(p, hub, exec, taskStore)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, hub, tpl, dispatcher)
+	e := api.NewRouter(taskStore, hub, tpl, manager)
 	log.Printf("Pattern 1 (Goroutine Pool) listening on %s [workers=%d, queue=%d, stageDur=%s]", addr, workers, queueSize, exec.StageDuration)
 	log.Fatal(e.Start(addr))
 }

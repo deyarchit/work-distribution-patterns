@@ -8,5 +8,4 @@ type TaskStore interface {
 	Get(id string) (models.Task, bool)
 	List() []models.Task
 	SetStatus(id string, status models.TaskStatus) error
-	UpdateStage(id string, idx int, stage models.Stage) error
 }

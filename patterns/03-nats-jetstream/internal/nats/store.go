@@ -72,20 +72,3 @@ func (s *JetStreamStore) SetStatus(id string, status models.TaskStatus) error {
 	_, err = s.kv.Put(id, data)
 	return err
 }
-
-func (s *JetStreamStore) UpdateStage(id string, idx int, stage models.Stage) error {
-	task, ok := s.Get(id)
-	if !ok {
-		return fmt.Errorf("task %s not found", id)
-	}
-	if idx < 0 || idx >= len(task.Stages) {
-		return fmt.Errorf("stage index %d out of range", idx)
-	}
-	task.Stages[idx] = stage
-	data, err := json.Marshal(task)
-	if err != nil {
-		return err
-	}
-	_, err = s.kv.Put(id, data)
-	return err
-}

@@ -22,7 +22,7 @@ stop-p3:
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
-	BASE_URL=$(BASE_URL) go test ./tests/e2e/... -v -timeout 120s
+	go clean -testcache && BASE_URL=$(BASE_URL) go test ./tests/e2e/... -v -timeout 120s
 
 ## Run load test against BASE_URL
 test-load:

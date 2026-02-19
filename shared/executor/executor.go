@@ -7,8 +7,9 @@ import (
 	"work-distribution-patterns/shared/models"
 )
 
-// ProgressSink receives progress updates from the executor.
-// *sse.Hub satisfies this interface directly.
+// ProgressSink receives progress updates from the executor — pure transport concern.
+// Implementations route events to the appropriate mechanism (SSE hub, WebSocket, NATS).
+// The task manager (not the worker) is responsible for persisting task status to the store.
 type ProgressSink interface {
 	Publish(event models.ProgressEvent)
 	PublishTaskStatus(taskID string, status models.TaskStatus)
@@ -21,8 +22,10 @@ type Executor struct {
 }
 
 // Run executes all stages of the task sequentially, emitting 10 progress ticks
-// per stage (StageDuration/10 sleep each tick).
-func (e *Executor) Run(ctx context.Context, task models.Task, sink ProgressSink) {
+// per stage (StageDuration/10 sleep each tick). Returns the terminal TaskStatus
+// (TaskCompleted or TaskFailed) so co-located task managers can persist it without
+// wrapping the sink.
+func (e *Executor) Run(ctx context.Context, task models.Task, sink ProgressSink) models.TaskStatus {
 	sink.PublishTaskStatus(task.ID, models.TaskRunning)
 
 	tickDuration := e.StageDuration / 10
@@ -40,7 +43,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink ProgressSink)
 			select {
 			case <-ctx.Done():
 				sink.PublishTaskStatus(task.ID, models.TaskFailed)
-				return
+				return models.TaskFailed
 			case <-time.After(tickDuration):
 			}
 
@@ -63,4 +66,5 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink ProgressSink)
 	}
 
 	sink.PublishTaskStatus(task.ID, models.TaskCompleted)
+	return models.TaskCompleted
 }

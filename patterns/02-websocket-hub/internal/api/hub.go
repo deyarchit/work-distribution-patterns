@@ -9,9 +9,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
 )
 
 // ErrNoWorkersAvailable is returned when no idle worker is available.
@@ -27,17 +27,19 @@ type WorkerConn struct {
 }
 
 // WorkerHub manages connected workers and dispatches tasks to them.
+// It is the task manager's receive side: progress events and terminal status
+// reported by workers over WebSocket are routed to the SSE hub and task store here.
 type WorkerHub struct {
 	mu        sync.Mutex
 	workers   []*WorkerConn
 	sseHub    *sse.Hub
-	taskStore executor.StatusWriter
+	taskStore store.TaskStore
 	nextIdx   int
 }
 
 // NewWorkerHub creates a WorkerHub that routes progress events to the SSE hub
 // and persists final task status to taskStore.
-func NewWorkerHub(sseHub *sse.Hub, taskStore executor.StatusWriter) *WorkerHub {
+func NewWorkerHub(sseHub *sse.Hub, taskStore store.TaskStore) *WorkerHub {
 	return &WorkerHub{sseHub: sseHub, taskStore: taskStore}
 }
 
@@ -58,7 +60,7 @@ func (h *WorkerHub) Register(conn *websocket.Conn, id string) *WorkerConn {
 	return wc
 }
 
-// Assign sends the task to an available (non-busy) worker using round-robin.
+// Assign sends the full task to an available (non-busy) worker using round-robin.
 // Returns ErrNoWorkersAvailable if all workers are busy or none are connected.
 func (h *WorkerHub) Assign(task models.Task) error {
 	h.mu.Lock()
@@ -79,11 +81,7 @@ func (h *WorkerHub) Assign(task models.Task) error {
 
 			msg := TaskMsg{
 				Type: MsgTypeTask,
-				Task: models.TaskAssignment{
-					TaskID:     task.ID,
-					Name:       task.Name,
-					StageCount: len(task.Stages),
-				},
+				Task: task,
 			}
 			data, err := json.Marshal(msg)
 			if err != nil {
@@ -140,7 +138,8 @@ func (wc *WorkerConn) writePump() {
 	}
 }
 
-// readPump processes messages from the worker and routes progress to the SSE hub.
+// readPump processes messages from the worker. This is the task manager's receive side:
+// progress events are forwarded to the SSE hub; terminal status is persisted to the store.
 func (wc *WorkerConn) readPump() {
 	defer func() {
 		wc.hub.remove(wc)

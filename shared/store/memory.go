@@ -66,16 +66,3 @@ func (s *MemoryStore) SetStatus(id string, status models.TaskStatus) error {
 	return nil
 }
 
-func (s *MemoryStore) UpdateStage(id string, idx int, stage models.Stage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.tasks[id]
-	if !ok {
-		return fmt.Errorf("task %s not found", id)
-	}
-	if idx < 0 || idx >= len(t.Stages) {
-		return fmt.Errorf("stage index %d out of range", idx)
-	}
-	t.Stages[idx] = stage
-	return nil
-}

@@ -44,9 +44,9 @@ func main() {
 		log.Fatalf("open KV: %v", err)
 	}
 
-	hub        := sse.NewHub()
-	taskStore  := natsinternal.NewJetStreamStore(kv)
-	dispatcher := natsinternal.NewNATSDispatcher(js)
+	hub       := sse.NewHub()
+	taskStore := natsinternal.NewJetStreamStore(kv)
+	manager   := natsinternal.NewNATSTaskManager(js, taskStore)
 
 	// Subscribe to all progress events on NATS Core and forward to SSE hub.
 	// Every API replica does this, so all SSE hubs receive all events regardless
@@ -57,13 +57,16 @@ func main() {
 			hub.Publish(ev)
 		}
 	})
+	// task_status.* events carry terminal and intermediate status from workers.
+	// Both the SSE hub and the task store are updated here; workers never touch the store.
 	nc.Subscribe("task_status.*", func(msg *nats.Msg) {
 		var payload struct {
-			TaskID string           `json:"taskID"`
+			TaskID string            `json:"taskID"`
 			Status models.TaskStatus `json:"status"`
 		}
 		if err := json.Unmarshal(msg.Data, &payload); err == nil {
 			hub.PublishTaskStatus(payload.TaskID, payload.Status)
+			_ = taskStore.SetStatus(payload.TaskID, payload.Status)
 		}
 	})
 
@@ -72,7 +75,7 @@ func main() {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, hub, tpl, dispatcher)
+	e := api.NewRouter(taskStore, hub, tpl, manager)
 	log.Printf("Pattern 3 (NATS JetStream) API listening on %s", addr)
 	log.Fatal(e.Start(addr))
 }

@@ -16,14 +16,15 @@ type ReadyMsg struct {
 }
 
 // TaskMsg is sent by the API to assign work to a worker.
+// The full Task is sent so the worker does not need to reconstruct any fields.
 type TaskMsg struct {
-	Type string                `json:"type"` // "task"
-	Task models.TaskAssignment `json:"task"`
+	Type string      `json:"type"` // "task"
+	Task models.Task `json:"task"`
 }
 
 // ProgressMsg is sent by the worker with a stage progress event.
 type ProgressMsg struct {
-	Type  string              `json:"type"` // "progress"
+	Type  string               `json:"type"` // "progress"
 	Event models.ProgressEvent `json:"event"`
 }
 

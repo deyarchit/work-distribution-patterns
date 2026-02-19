@@ -29,14 +29,14 @@ func main() {
 	sseHub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
 	workerHub := wsapi.NewWorkerHub(sseHub, taskStore)
-	dispatcher := wsapi.NewWSDispatcher(workerHub)
+	manager := wsapi.NewWSTaskManager(workerHub, taskStore)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, sseHub, tpl, dispatcher)
+	e := api.NewRouter(taskStore, sseHub, tpl, manager)
 
 	// Register worker WebSocket endpoint
 	e.GET("/ws/register", func(c echo.Context) error {

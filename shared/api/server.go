@@ -16,7 +16,7 @@ func NewRouter(
 	taskStore store.TaskStore,
 	hub *sse.Hub,
 	tpl *template.Template,
-	dispatcher dispatch.Dispatcher,
+	manager dispatch.TaskManager,
 ) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
@@ -31,7 +31,7 @@ func NewRouter(
 		}
 	})
 
-	e.POST("/tasks", SubmitTask(taskStore, dispatcher))
+	e.POST("/tasks", SubmitTask(manager))
 	e.GET("/tasks", ListTasks(taskStore))
 	e.GET("/tasks/:id", GetTask(taskStore))
 	e.GET("/events", SSEStream(hub))

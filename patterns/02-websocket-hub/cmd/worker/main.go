@@ -170,20 +170,8 @@ func runWorker(conn *websocket.Conn, exec *executor.Executor, quit <-chan os.Sig
 				log.Printf("unmarshal task: %v", err)
 				continue
 			}
-			assign := msg.Task
-			log.Printf("received task %s (%d stages)", assign.TaskID, assign.StageCount)
-
-			stageNames := []string{"Initialization", "Validation", "Processing", "Transformation", "Aggregation", "Optimization", "Finalization", "Cleanup"}
-			stages := make([]models.Stage, assign.StageCount)
-			for i := range stages {
-				stages[i] = models.Stage{Index: i, Name: stageNames[i%len(stageNames)], Status: models.StagePending}
-			}
-			task := models.Task{
-				ID:     assign.TaskID,
-				Name:   assign.Name,
-				Stages: stages,
-			}
-
+			task := msg.Task
+			log.Printf("received task %s (%d stages)", task.ID, len(task.Stages))
 			go exec.Run(context.Background(), task, sink)
 		}
 	}

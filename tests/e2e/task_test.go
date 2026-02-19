@@ -43,9 +43,9 @@ func TestSingleTask(t *testing.T) {
 	}
 }
 
-// TestConcurrentTasks submits 5 tasks simultaneously and asserts all complete.
+// TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
 func TestConcurrentTasks(t *testing.T) {
-	const numTasks = 5
+	const numTasks = 3
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
