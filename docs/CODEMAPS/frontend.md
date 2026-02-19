@@ -1,84 +1,57 @@
-<!-- Commit: dbc0e450f41ec0f930cf88b8badcb7c47ca74646 | Files scanned: 25 | Token estimate: ~400 -->
+<!-- Commit: 9d2e9ebb8ac2895ba48208a39da72b1b4d012efd | Files scanned: 2 | Token estimate: ~350 -->
 
-# Frontend
+# Frontend Codemap
 
-Single embedded HTMX + vanilla JS page. No build step.
+## Stack
 
-## Template Files
+- **HTMX 1.9.12** (CDN) for form submission and fragment swapping
+- **Vanilla JS** for SSE event handling and DOM mutation
+- **Go `html/template`** with embedded FS (`shared/templates/embed.go`)
 
-```
-shared/templates/embed.go      — go:embed index.html; exposes var FS embed.FS
-shared/templates/index.html    — defines two Go templates:
-  {{define "index.html"}}      — full page
-  {{define "task-card"}}       — HTMX fragment (rendered server-side on POST /tasks)
-```
+## Templates (`shared/templates/index.html`)
 
-## Page Structure
+| Template | Usage |
+|----------|-------|
+| `index.html` | Full page shell; rendered by `GET /` |
+| `task-card` | Task fragment; returned by `POST /tasks` (HTMX swap) |
 
-```
-<body>
-  .container
-    h1 "Work Distribution Patterns"
-    .form-card
-      <form hx-post="/tasks" hx-target="#task-list" hx-swap="afterbegin">
-        input[name=name]         Task Name
-        input[name=stage_count]  Stages 1–8
-        button[submit]
-    .tasks-header
-      h2 "Tasks"
-      #sse-status               ● Ready | ● Connected | ● Disconnected
-    #task-list
-      .task-card#task-<uuid>    (one per submitted task)
-        .task-header  .badge[status]
-        .overall-progress → .overall-progress-bar
-        .stages → .stage-row[data-stage=N]
-          .stage-dot  .stage-name  .stage-progress-track → .stage-progress-fill  .stage-pct
+## HTMX Integration
+
+```html
+<form hx-post="/tasks" hx-target="#task-list" hx-swap="afterbegin">
 ```
 
-## JavaScript — SSE Connection Management
+- Form POST triggers `SubmitTask` handler (detects `HX-Request: true`)
+- Response is the `task-card` template fragment, prepended to `#task-list`
+- `htmx:afterSwap` triggers `openTaskSSE(taskID)` and `syncCardState(taskID)`
+
+## SSE Event Flow
 
 ```
-taskConnections: Map<taskID, EventSource>
+GET /events?taskID=<id>  ─► per-task EventSource (stored in taskConnections Map)
 
-openTaskSSE(taskID)        — opens /events?taskID=<id>; no-op if already open
-closeTaskSSE(taskID)       — closes + deletes; shows "● Ready" when last closes
-updateSSEStatus(connected) — drives #sse-status (true=Connected, false=Disconnected)
+  data: {"type":"stage_progress", taskID, stageIdx, stageName, progress, status}
+       → handleStageProgress() → .stage-dot class, .stage-progress-fill width, .stage-pct text
+                               → updateOverallProgress() (average of all stage fills)
 
-htmx:afterSwap on #task-list:
-  taskID = first inserted card's id
-  openTaskSSE(taskID)     ← scoped SSE connection
-  syncCardState(taskID)   ← GET /tasks/:id to catch any missed events
+  data: {"type":"task_status", taskID, status}
+       → handleTaskStatus() → .task-card class + .badge text/class
+                            → closeTaskSSE(taskID) on terminal status
 ```
 
-## JavaScript — SSE Event Handlers
+- One `EventSource` per active task; closed on `completed` or `failed`
+- `syncCardState(taskID)` fetches `GET /tasks/:id` on card insertion to catch missed events
+- Heartbeat: server sends `: heartbeat\n\n` every 15 s to keep connections alive
+
+## Card DOM Structure
 
 ```
-onmessage → JSON.parse → dispatch by ev.type:
-  "stage_progress" → handleStageProgress(ev)
-    card = #task-<ev.taskID>
-    row  = [data-stage=ev.stageIdx]
-    update: .stage-dot class, .stage-progress-fill width+class, .stage-pct text
-    updateOverallProgress(card)
-  "task_status" → handleTaskStatus(ev)
-    update: .task-card class, .badge class+text
-    updateOverallProgress(card)
-    if completed|failed → closeTaskSSE(ev.taskID)
-```
-
-## SSE Status States
-
-| Label | Class | Trigger |
-|-------|-------|---------|
-| ● Ready | `connected` (green) | page load; last task SSE closes normally |
-| ● Connected | `connected` (green) | any task SSE opens (onopen) |
-| ● Disconnected | `disconnected` (red) | onerror with no remaining connections |
-
-## CSS Classes
-
-```
-.task-card[.running|.completed|.failed]  — border color
-.badge[.pending|.running|.completed|.failed]
-.stage-dot[.running|.completed|.failed]
-.stage-progress-fill[.completed|.failed]
-#sse-status[.connected|.disconnected]
+.task-card#task-{id}  (.running | .completed | .failed)
+  .task-header
+    .task-name  /  .task-meta (short ID + time)
+    .badge  (.pending | .running | .completed | .failed)
+  .overall-progress > .overall-progress-bar
+  .stages
+    .stage-row[data-stage=N]  (one per stage)
+      .stage-dot  /  .stage-name  /  .stage-progress-track > .stage-progress-fill  /  .stage-pct
 ```
