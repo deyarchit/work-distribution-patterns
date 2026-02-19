@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-18 | Files scanned: 27 | Token estimate: ~650 -->
+<!-- Commit: dbc0e450f41ec0f930cf88b8badcb7c47ca74646 | Files scanned: 25 | Token estimate: ~700 -->
 
 # Architecture
 
@@ -6,16 +6,21 @@ Single Go module (`work-distribution-patterns`) with a shared core and three
 interchangeable pattern implementations. All three expose an identical HTTP API
 and HTMX frontend; only the task dispatch mechanism differs.
 
-## Key Abstraction
+## Key Abstractions
 
 ```
-dispatch.TaskManager interface
+dispatch.TaskManager interface          (API side)
   └── Submit(ctx, task) error
       (full lifecycle: persist → dispatch → route progress → persist terminal status)
+
+dispatch.TaskSource interface           (worker side)
+  └── Receive(ctx) (Task, error)
+      (blocks until a task is available or ctx is cancelled)
 ```
 
-`shared/api` depends only on this interface — never on pattern-specific code.
-Each pattern implements TaskManager to handle its unique dispatch mechanics.
+`shared/api` depends only on `TaskManager` — never on pattern-specific code.
+Workers depend only on `TaskSource` — they have no knowledge of stores, SSE, or browsers.
+Each pattern implements both sides for its unique dispatch mechanics.
 
 ## Pattern Topologies
 
@@ -46,11 +51,12 @@ Browser
   ▼
 Echo API ──► WSTaskManager ──► WorkerHub.Assign() ──► worker (WebSocket)
   │                                                        │
-  │ GET /events?taskID=<id>                          Executor.Run()
-  ◄── sse.Hub ◄──────────────────────────── progress msgs over WS
+  │ GET /events?taskID=<id>                          WSTaskSource.Receive()
+  ◄── sse.Hub ◄──────────────────────────── wsSink sends progress over WS
 
 Lifecycle: API creates task → store.Create() → WorkerHub.Assign()
-           Worker runs → wsSink sends progress over WS → API receives & forwards
+           Worker receives via source.Receive() → exec.Run(task, source.Sink())
+           wsSink sends progress over WS → API receives & forwards to hub
            API marks terminal status when DoneMsg arrives
 ```
 
@@ -67,15 +73,15 @@ Browser
   ▼
 Echo API ──► NATSTaskManager ──► JetStream "tasks.new"
   │                                    │
-  │                              worker consumes
-  │                              Executor.Run() → natsSink
+  │                              NATSTaskSource.Receive()
+  │                              Executor.Run() → NATSSink
   │                                    │
   │                              NATS Core progress.* + task_status.*
   ◄── sse.Hub ◄── all API replicas subscribe to NATS Core
 
 Lifecycle: API creates task → store.Create() → js.Publish("tasks.new")
-           Worker consumes → Executor.Run() → natsSink publishes progress & status
-           All APIs receive via NATS subscription → Hub broadcasts & store updates
+           Worker receives via source.Receive() → exec.Run(task, natsSink)
+           natsSink publishes progress & status → all APIs receive via NATS → hub broadcasts & store updates
 ```
 
 - 2 binaries (`bin/p3-api`, `bin/p3-worker`)
@@ -88,9 +94,9 @@ Lifecycle: API creates task → store.Create() → js.Publish("tasks.new")
 
 ```
 shared/
-  models/      Task, Stage, ProgressEvent, TaskStatus — pure data types
-  dispatch/    TaskManager interface + contract documentation
-  executor/    Executor.Run() — stage loop, 10 ticks/stage; returns TaskStatus
+  models/      Task, Stage, ProgressEvent, TaskStatus — pure data types; NewTask() constructor
+  dispatch/    TaskManager interface (API) + TaskSource interface (worker)
+  executor/    ProgressSink interface + Executor.Run() — stage loop, randomized duration per stage
   sse/         Hub — task-scoped + global fan-out broadcaster
   store/       TaskStore interface + MemoryStore
   api/         Echo router + handlers (depends on TaskManager, Hub, TaskStore)
@@ -101,14 +107,14 @@ shared/
 
 ```
 1. Browser POST /tasks
-2. API handler creates Task (uuid, stages, status=pending)
+2. API handler creates Task via models.NewTask(name, stageCount)
 3. handler calls manager.Submit(ctx, task)
 4. manager persists: store.Create(task)
 5. manager dispatches work (pattern-specific)
-6. worker receives task
+6. worker receives via TaskSource.Receive(ctx)
 7. worker runs Executor.Run(ctx, task, sink)
-8. executor emits ProgressEvent, then terminal TaskStatus
-9. sink routes events back to API (Hub, WebSocket, or NATS)
+8. executor emits ProgressEvent per tick, then terminal TaskStatus
+9. sink routes events back to API (Hub direct, WebSocket, or NATS)
 10. manager receives completion, persists: store.SetStatus(task.ID, status)
 11. browser SSE stream receives task_status event, updates UI
 ```

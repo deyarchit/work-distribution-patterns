@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-18 | Files scanned: 27 | Token estimate: ~400 -->
+<!-- Commit: dbc0e450f41ec0f930cf88b8badcb7c47ca74646 | Files scanned: 25 | Token estimate: ~400 -->
 
 # Frontend
 
@@ -7,7 +7,7 @@ Single embedded HTMX + vanilla JS page. No build step.
 ## Template Files
 
 ```
-shared/templates/embed.go      — go:embed index.html; exposes ParsedTemplate()
+shared/templates/embed.go      — go:embed index.html; exposes var FS embed.FS
 shared/templates/index.html    — defines two Go templates:
   {{define "index.html"}}      — full page
   {{define "task-card"}}       — HTMX fragment (rendered server-side on POST /tasks)
