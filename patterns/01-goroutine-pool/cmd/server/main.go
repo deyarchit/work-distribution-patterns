@@ -27,7 +27,7 @@ func main() {
 	p := pool.New(workers, queueSize)
 	defer p.Stop()
 
-	dispatcher := pool.NewPoolDispatcher(p, hub, exec)
+	dispatcher := pool.NewPoolDispatcher(p, hub, exec, taskStore)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {

@@ -1,4 +1,4 @@
-.PHONY: run-p1 run-p2 run-p3 test-e2e test-load build-all tidy stop-p2 stop-p3
+.PHONY: run-p1 run-p2 run-p3 test-e2e test-load test-all build-all tidy stop-p2 stop-p3
 
 BASE_URL ?= http://localhost:8080
 
@@ -35,6 +35,21 @@ build-all:
 	go build -o bin/p2-worker  ./patterns/02-websocket-hub/cmd/worker
 	go build -o bin/p3-api     ./patterns/03-nats-jetstream/cmd/api
 	go build -o bin/p3-worker  ./patterns/03-nats-jetstream/cmd/worker
+
+## Build all binaries and validate all three patterns end-to-end
+test-all: build-all
+	@echo "==> [1/3] Pattern 1: goroutine-pool"
+	STAGE_DURATION_SECS=1 ./bin/p1-server &
+	sleep 3
+	BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; pkill -f "bin/p1-server" 2>/dev/null || true; exit $$RC
+	@echo "==> [2/3] Pattern 2: websocket-hub"
+	$(MAKE) run-p2 &
+	sleep 5
+	BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; $(MAKE) stop-p2; exit $$RC
+	@echo "==> [3/3] Pattern 3: nats-jetstream"
+	$(MAKE) run-p3 &
+	sleep 5
+	BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; $(MAKE) stop-p3; exit $$RC
 
 ## Tidy modules
 tidy:

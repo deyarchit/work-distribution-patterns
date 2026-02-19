@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
 )
@@ -27,15 +28,17 @@ type WorkerConn struct {
 
 // WorkerHub manages connected workers and dispatches tasks to them.
 type WorkerHub struct {
-	mu      sync.Mutex
-	workers []*WorkerConn
-	sseHub  *sse.Hub
-	nextIdx int
+	mu        sync.Mutex
+	workers   []*WorkerConn
+	sseHub    *sse.Hub
+	taskStore executor.StatusWriter
+	nextIdx   int
 }
 
-// NewWorkerHub creates a WorkerHub that routes progress events to the SSE hub.
-func NewWorkerHub(sseHub *sse.Hub) *WorkerHub {
-	return &WorkerHub{sseHub: sseHub}
+// NewWorkerHub creates a WorkerHub that routes progress events to the SSE hub
+// and persists final task status to taskStore.
+func NewWorkerHub(sseHub *sse.Hub, taskStore executor.StatusWriter) *WorkerHub {
+	return &WorkerHub{sseHub: sseHub, taskStore: taskStore}
 }
 
 // Register adds a new worker connection and starts its read/write pumps.
@@ -179,6 +182,7 @@ func (wc *WorkerConn) readPump() {
 			var msg DoneMsg
 			if err := json.Unmarshal(raw, &msg); err == nil {
 				wc.hub.sseHub.PublishTaskStatus(msg.TaskID, models.TaskCompleted)
+				_ = wc.hub.taskStore.SetStatus(msg.TaskID, models.TaskCompleted)
 				wc.hub.mu.Lock()
 				wc.busy = false
 				wc.hub.mu.Unlock()

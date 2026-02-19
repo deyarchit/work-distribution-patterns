@@ -28,7 +28,7 @@ func main() {
 
 	sseHub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	workerHub := wsapi.NewWorkerHub(sseHub)
+	workerHub := wsapi.NewWorkerHub(sseHub, taskStore)
 	dispatcher := wsapi.NewWSDispatcher(workerHub)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")

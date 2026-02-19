@@ -120,7 +120,7 @@ func TestStatusTransitions(t *testing.T) {
 	id := postTask(t, "e2e-transitions", 2)
 	t.Logf("submitted task %s", id)
 
-	// Immediately check pending
+	// Immediately check pending (task may have been picked up already)
 	task := getTask(t, id)
 	if task.Status != "pending" && task.Status != "running" {
 		t.Errorf("expected pending or running immediately after submit, got %s", task.Status)
@@ -128,35 +128,21 @@ func TestStatusTransitions(t *testing.T) {
 
 	events := SSEClient(ctx, t, id)
 
-	seenRunning := false
-	seenCompleted := false
-
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timeout: seenRunning=%v seenCompleted=%v", seenRunning, seenCompleted)
+			t.Fatal("timeout waiting for completed status")
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed")
 			}
-			if ev.Type == "task_status" && ev.Status == "running" {
-				seenRunning = true
-				t.Log("saw running status")
-				// Poll store
-				task := getTask(t, id)
-				if task.Status != "running" && task.Status != "completed" {
-					t.Errorf("store status mismatch: got %s", task.Status)
-				}
-			}
+			// running is SSE-only (UI signal); skip store check to avoid the
+			// race where the event fires before the client connects.
 			if ev.Type == "task_status" && ev.Status == "completed" {
-				seenCompleted = true
 				t.Log("saw completed status")
 				task := getTask(t, id)
 				if task.Status != "completed" {
 					t.Errorf("expected store status=completed, got %s", task.Status)
-				}
-				if !seenRunning {
-					t.Error("completed without seeing running transition")
 				}
 				return
 			}

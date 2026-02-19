@@ -30,7 +30,10 @@ make run-p3 / make stop-p3
 # Build all five binaries into bin/
 make build-all
 
-# E2E tests — requires a running server
+# Build + E2E tests against all three patterns (full validation)
+make test-all
+
+# E2E tests against a specific already-running server
 BASE_URL=http://localhost:8080 make test-e2e
 
 # Run a single E2E test
@@ -50,6 +53,16 @@ make tidy
 3. Wire `shared/api.NewServer(dispatcher, store, hub)` in `main.go`.
 4. Wire `executor.Executor` to emit into `ProgressSink` (either `sse.Hub` directly or an adapter).
 5. Add `run-pN` / `stop-pN` / build targets to `Makefile`.
+
+## After Every Code Change or Feature Implementation
+
+After completing any code change session or feature implementation, verify that all tests pass:
+
+```bash
+make test-all
+```
+
+This builds all binaries and runs the full E2E suite against all three patterns in sequence. All three patterns must pass before the work is considered complete.
 
 ## Key Design Constraints
 
