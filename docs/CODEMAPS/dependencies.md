@@ -26,6 +26,7 @@ NATS Server (JetStream enabled)
   Stream:    TASKS  subjects: tasks.>  retention: WorkQueuePolicy
   KV Bucket: task-store  TTL: 24h
   Subjects:  progress.<taskID>  (Core NATS, pub from worker → sub on all APIs)
+             task_status.<taskID>  (Core NATS, pub from worker → sub on all APIs)
 
 nginx
   Load-balances :8080 → api replicas :8081/:8082/:8083
