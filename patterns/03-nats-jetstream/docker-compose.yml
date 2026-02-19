@@ -18,6 +18,12 @@ services:
     restart: on-failure
     deploy:
       replicas: 3
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/tasks"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
 
   worker:
     build:
@@ -38,4 +44,5 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - api
+      api:
+        condition: service_healthy

@@ -16,8 +16,8 @@ import (
 )
 
 func main() {
-	natsURL      := envOr("NATS_URL", nats.DefaultURL)
-	stageDurSecs := envInt("STAGE_DURATION_SECS", 3)
+	natsURL    := envOr("NATS_URL", nats.DefaultURL)
+	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
 
 	nc, err := nats.Connect(natsURL,
 		nats.MaxReconnects(-1),
@@ -42,7 +42,7 @@ func main() {
 
 	source := natsinternal.NewNATSTaskSource(js)
 	sink   := natsinternal.NewNATSSink(nc)
-	exec   := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
+	exec   := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
 
 	log.Printf("Pattern 3 worker listening on NATS %s", natsURL)
 

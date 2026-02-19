@@ -14,14 +14,14 @@ import (
 )
 
 func main() {
-	apiURL       := envOr("API_URL", "ws://localhost:8080/ws/register")
-	stageDurSecs := envInt("STAGE_DURATION_SECS", 3)
+	apiURL     := envOr("API_URL", "ws://localhost:8080/ws/register")
+	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	source := worker.NewWSTaskSource(apiURL)
-	exec   := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
+	exec   := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
 
 	go source.Connect(ctx)
 

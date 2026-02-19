@@ -19,11 +19,11 @@ func main() {
 	addr         := envOr("ADDR", ":8080")
 	workers      := envInt("WORKERS", 5)
 	queueSize    := envInt("QUEUE_SIZE", 20)
-	stageDurSecs := envInt("STAGE_DURATION_SECS", 3)
+	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
 
 	hub       := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	exec      := &executor.Executor{StageDuration: time.Duration(stageDurSecs) * time.Second}
+	exec      := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
 	p         := pool.New(workers, queueSize)
 	defer p.Stop()
 
@@ -35,7 +35,7 @@ func main() {
 	}
 
 	e := api.NewRouter(taskStore, hub, tpl, manager)
-	log.Printf("Pattern 1 (Goroutine Pool) listening on %s [workers=%d, queue=%d, stageDur=%s]", addr, workers, queueSize, exec.StageDuration)
+	log.Printf("Pattern 1 (Goroutine Pool) listening on %s [workers=%d, queue=%d, maxStage=%s]", addr, workers, queueSize, exec.MaxStageDuration)
 	log.Fatal(e.Start(addr))
 }
 

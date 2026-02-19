@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"math/rand"
 	"time"
 
 	"work-distribution-patterns/shared/models"
@@ -16,21 +17,23 @@ type ProgressSink interface {
 }
 
 // Executor runs a task's stages sequentially, emitting progress events.
-// StageDuration is set once at construction from server config (STAGE_DURATION_SECS).
+// MaxStageDuration is set once at construction from server config (MAX_STAGE_DURATION).
+// Each stage picks a random duration in [0, MaxStageDuration].
 type Executor struct {
-	StageDuration time.Duration
+	MaxStageDuration time.Duration
 }
 
 // Run executes all stages of the task sequentially, emitting 10 progress ticks
-// per stage (StageDuration/10 sleep each tick). Returns the terminal TaskStatus
-// (TaskCompleted or TaskFailed) so co-located task managers can persist it without
-// wrapping the sink.
+// per stage. Each stage duration is randomized in [0, MaxStageDuration].
+// Returns the terminal TaskStatus (TaskCompleted or TaskFailed).
 func (e *Executor) Run(ctx context.Context, task models.Task, sink ProgressSink) models.TaskStatus {
 	sink.PublishTaskStatus(task.ID, models.TaskRunning)
 
-	tickDuration := e.StageDuration / 10
-
 	for _, stage := range task.Stages {
+		var tickDuration time.Duration
+		if e.MaxStageDuration > 0 {
+			tickDuration = time.Duration(rand.Int63n(int64(e.MaxStageDuration)+1)) / 10
+		}
 		sink.Publish(models.ProgressEvent{
 			TaskID:    task.ID,
 			StageIdx:  stage.Index,
