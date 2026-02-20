@@ -1,0 +1,57 @@
+services:
+  nats:
+    image: nats:latest
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # monitoring
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: patterns/04-nats-redis/Dockerfile.api
+    environment:
+      - ADDR=:8080
+      - NATS_URL=nats://nats:4222
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - nats
+      - redis
+    restart: on-failure
+    deploy:
+      replicas: 3
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/tasks"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: patterns/04-nats-redis/Dockerfile.worker
+    environment:
+      - NATS_URL=nats://nats:4222
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - nats
+      - redis
+    restart: on-failure
+    deploy:
+      replicas: 3
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy

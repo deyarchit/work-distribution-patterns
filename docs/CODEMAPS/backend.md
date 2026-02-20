@@ -1,4 +1,4 @@
-<!-- Commit: 9d2e9ebb8ac2895ba48208a39da72b1b4d012efd | Files scanned: 43 | Token estimate: ~600 -->
+<!-- Commit: df20ceb2bcbfbc77dba582b5941ded7dc533bfd5 | Files scanned: 47 | Token estimate: ~680 -->
 
 # Backend Codemap
 
@@ -16,6 +16,8 @@
 | `p01/internal/pool` | `pool.go`, `manager.go` | Bounded goroutine pool; `PoolTaskManager` |
 | `p02/internal/api` | `hub.go`, `manager.go`, `messages.go` | WebSocket worker hub; `WSTaskManager` |
 | `p03/internal/nats` | `manager.go`, `source.go`, `setup.go`, `store.go` | NATS manager, source+sink, KV store |
+| `p04/internal/nats` | `setup.go`, `source.go` | JetStream setup + `NATSTaskSource` (worker task pull) |
+| `p04/internal/redis` | `manager.go`, `sink.go`, `store.go` | Redis manager (NATS submit + Redis SSE fan-out), `RedisSink`, Redis store |
 
 ## API Routes (`shared/api`)
 
@@ -66,3 +68,5 @@ type ProgressEvent struct { TaskID string; StageIdx int; StageName string; Progr
 **Pattern 2** — `WorkerHub.readPump` is the receive side: `ProgressMsg` → `sseHub.Publish`; `DoneMsg` → `sseHub.PublishTaskStatus` + `store.SetStatus`. Workers report via WebSocket JSON messages.
 
 **Pattern 3** — `NATSTaskManager` subscribes to `progress.*` and `task_status.*` on NATS Core at startup; all API replicas receive all worker events. `JetStreamStore` uses a NATS KV bucket for cross-replica state.
+
+**Pattern 4** — `RedisTaskManager.Submit` publishes to NATS JetStream (`tasks.new`); workers pull via `NATSTaskSource` (at-least-once). Workers publish progress via `RedisSink` directly to Redis Pub/Sub. All API replicas PSubscribe to Redis `progress:*` / `task_status:*` → `hub.Publish()` + `store.SetStatus()`. `RedisTaskStore` uses Redis Strings + Set for shared cross-replica state. nginx uses `resolver 127.0.0.11` + variable upstream for true round-robin.

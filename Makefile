@@ -1,4 +1,4 @@
-.PHONY: run-p1 run-p2 run-p3 test-e2e test-load test-all build-all tidy stop-p2 stop-p3 lint fmt
+.PHONY: run-p1 run-p2 run-p3 run-p4 test-e2e test-load test-all build-all tidy stop-p2 stop-p3 stop-p4 lint fmt
 
 BASE_URL ?= http://localhost:8080
 
@@ -20,6 +20,13 @@ run-p3:
 stop-p3:
 	docker compose -f patterns/03-nats-jetstream/docker-compose.yml down
 
+## Run Pattern 4 with Docker Compose (3 APIs + 3 workers + NATS + Redis + nginx)
+run-p4:
+	docker compose -f patterns/04-nats-redis/docker-compose.yml up --build
+
+stop-p4:
+	docker compose -f patterns/04-nats-redis/docker-compose.yml down
+
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
 	go clean -testcache && BASE_URL=$(BASE_URL) go test ./tests/e2e/... -v -timeout 120s
@@ -28,17 +35,19 @@ test-e2e:
 test-load:
 	go run ./tests/load/load.go -url $(BASE_URL)
 
-## Build all five binaries
+## Build all seven binaries
 build-all:
 	go build -o bin/p1-server  ./patterns/01-goroutine-pool/cmd/server
 	go build -o bin/p2-api     ./patterns/02-websocket-hub/cmd/api
 	go build -o bin/p2-worker  ./patterns/02-websocket-hub/cmd/worker
 	go build -o bin/p3-api     ./patterns/03-nats-jetstream/cmd/api
 	go build -o bin/p3-worker  ./patterns/03-nats-jetstream/cmd/worker
+	go build -o bin/p4-api     ./patterns/04-nats-redis/cmd/api
+	go build -o bin/p4-worker  ./patterns/04-nats-redis/cmd/worker
 
-## Build all binaries and validate all three patterns end-to-end
+## Build all binaries and validate all four patterns end-to-end
 test-all: build-all
-	@echo "==> [1/3] Pattern 1: goroutine-pool"
+	@echo "==> [1/4] Pattern 1: goroutine-pool"
 	@{ \
 	  ./bin/p1-server & \
 	  until curl -sf http://localhost:8080/tasks > /dev/null 2>&1; do sleep 1; done; \
@@ -46,18 +55,25 @@ test-all: build-all
 	  pkill -f "bin/p1-server" 2>/dev/null || true; \
 	  exit $$RC; \
 	}
-	@echo "==> [2/3] Pattern 2: websocket-hub"
+	@echo "==> [2/4] Pattern 2: websocket-hub"
 	@{ \
 	  docker compose -f patterns/02-websocket-hub/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/02-websocket-hub/docker-compose.yml down; \
 	  exit $$RC; \
 	}
-	@echo "==> [3/3] Pattern 3: nats-jetstream"
+	@echo "==> [3/4] Pattern 3: nats-jetstream"
 	@{ \
 	  docker compose -f patterns/03-nats-jetstream/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/03-nats-jetstream/docker-compose.yml down; \
+	  exit $$RC; \
+	}
+	@echo "==> [4/4] Pattern 4: nats-redis"
+	@{ \
+	  docker compose -f patterns/04-nats-redis/docker-compose.yml up --build -d --wait && \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -f patterns/04-nats-redis/docker-compose.yml down; \
 	  exit $$RC; \
 	}
 

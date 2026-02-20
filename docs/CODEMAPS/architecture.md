@@ -1,10 +1,10 @@
-<!-- Commit: 9d2e9ebb8ac2895ba48208a39da72b1b4d012efd | Files scanned: 43 | Token estimate: ~500 -->
+<!-- Commit: df20ceb2bcbfbc77dba582b5941ded7dc533bfd5 | Files scanned: 53 | Token estimate: ~700 -->
 
 # Architecture
 
 ## Overview
 
-Three patterns demonstrating different work distribution topologies, all sharing the same HTTP API surface and HTMX frontend.
+Four patterns demonstrating different work distribution topologies, all sharing the same HTTP API surface and HTMX frontend.
 
 ## Shared Interfaces
 
@@ -60,3 +60,27 @@ Browser ◄── GET /events ───┘ (any replica — no sticky sessions n
 - Store: `JetStreamStore` (NATS KV bucket — shared across all replicas)
 - Workers: queue-subscribe on `tasks.new`; at-least-once delivery
 - Env: `NATS_URL`
+
+## Pattern 4: NATS + Redis (hybrid — NATS queue, Redis SSE fan-out)
+
+```
+Browser ──POST /tasks──► nginx ──► API replica ──► RedisTaskManager ──► JetStream "tasks.new"
+                           │   (resolver 127.0.0.11;                          │
+                           │    round-robins across                  Worker (NATSTaskSource + RedisSink)
+                           │    all healthy replicas)               executor.Run()
+                           │                                              │
+                        Redis Pub/Sub ◄──────────────────────────── PUBLISH progress:<id>
+                      (PSUBSCRIBE progress:*                        PUBLISH task_status:<id>
+                       task_status:*)
+                              │
+                     ALL API replicas receive every event
+                     hub.Publish() / store.SetStatus()
+
+Browser ◄── GET /events ───┘ (any replica — no sticky sessions needed)
+```
+
+- Store: `RedisTaskStore` (Redis Strings + Set — shared across all replicas)
+- Workers: NATS JetStream queue-subscribe on `tasks.new`; at-least-once delivery
+- Workers publish progress to Redis Pub/Sub (`RedisSink`); API layer owns SSE routing
+- nginx uses `resolver 127.0.0.11 valid=5s` + `set $upstream` variable for true round-robin
+- Env: `NATS_URL`, `REDIS_ADDR`

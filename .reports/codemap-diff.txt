@@ -1,4 +1,4 @@
-last-sha: 9d2e9ebb8ac2895ba48208a39da72b1b4d012efd
+last-sha: df20ceb2bcbfbc77dba582b5941ded7dc533bfd5
 updated: 2026-02-19
-commit-range: (full-scan)..9d2e9eb
-codemaps-touched: docs/CODEMAPS/architecture.md docs/CODEMAPS/backend.md docs/CODEMAPS/frontend.md docs/CODEMAPS/dependencies.md
+commit-range: 9d2e9eb..df20ceb
+codemaps-touched: docs/CODEMAPS/architecture.md docs/CODEMAPS/backend.md docs/CODEMAPS/dependencies.md docs/CODEMAPS/rationale.md
