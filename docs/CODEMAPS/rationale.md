@@ -51,3 +51,26 @@ Commits: `40c16d7..7fe066a`
 - **NATS `nats.conf` for P3/P4**: NATS 2.12+ changed JetStream defaults — `Max Storage: 0 B`
   without explicit config. Running with `-js` flag alone disables file storage. Explicit
   `nats.conf` with `max_file_store: 1GB` and a named Docker volume is required.
+
+## 394144d — 2026-02-20
+Commits: `7fe066a..394144d`
+
+### Decisions
+- **Three-layer architecture (`WorkerBus` / `WorkerSource`)**: Replaced four bespoke
+  `*TaskManager` structs with a single `shared/manager.Manager`. The variation between
+  patterns is fully captured by two interfaces: `WorkerBus` (manager-side) and
+  `WorkerSource` (worker-side). Sentinel errors (`ErrDispatchFull`, `ErrNoWorkers`) are
+  returned from `Dispatch` and mapped to HTTP 429/503 in one place.
+
+- **`ChannelBus` implements both sides (P1)**: In a single-process pattern, splitting
+  into separate bus/source types adds no value. One struct with three channels satisfies
+  both interfaces; `Start`/`Connect` are no-ops.
+
+- **Deadline loop in shared Manager**: Re-dispatch logic (scan non-terminal tasks, re-enqueue
+  if `now - dispatchTime > deadline`) lives once in `Manager.runDeadlineLoop`. Passing
+  `deadline=0` disables the loop entirely — P1/P2 skip it; P3/P4 use 30 s.
+
+- **`context.Background()` in P1 server (no signal handling)**: Adding `signal.NotifyContext`
+  caused SIGTERM to be intercepted, keeping the Echo server alive and blocking port 8080
+  between E2E test runs. Using `context.Background()` lets `pkill` kill the process
+  immediately — acceptable for a single-process demo pattern.

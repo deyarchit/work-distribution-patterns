@@ -1,4 +1,4 @@
-<!-- Commit: 7fe066ab6730595a6c51680b8324893cbae27fa5 | Files scanned: 51 | Token estimate: ~720 -->
+<!-- Commit: 394144da8e51a3a4b807c8913f7bca4ab40e5b8e | Files scanned: 58 | Token estimate: ~680 -->
 
 # Backend Codemap
 
@@ -7,17 +7,21 @@
 | Package | Path | Role |
 |---------|------|------|
 | `shared/api` | `handlers.go`, `server.go` | HTTP routes (`/tasks`, `/events`, `/health`), HTMX handlers |
-| `shared/dispatch` | `manager.go`, `source.go`, `sink.go`, `result.go` | `TaskManager`, `TaskSource`, `ProgressSink`, `ResultSink` interfaces |
+| `shared/dispatch` | `manager.go`, `bus.go`, `worker_source.go`, `sink.go` | `TaskManager`, `WorkerBus`, `WorkerSource`, `ProgressSink` interfaces + sentinel errors |
+| `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, routes bus events to store/hub |
 | `shared/executor` | `executor.go` | Stage runner; emits to `dispatch.ProgressSink`; returns `TaskStatus` |
 | `shared/models` | `task.go` | `Task`, `Stage`, `ProgressEvent`, `TaskStatusEvent`, status enums |
 | `shared/sse` | `hub.go` | SSE fan-out; implements `dispatch.ProgressSink` |
 | `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
-| `p01/internal/pool` | `pool.go`, `manager.go` | Bounded goroutine pool; `PoolTaskManager`; `poolResultSink` |
-| `p02/internal/api` | `hub.go`, `manager.go`, `messages.go` | WebSocket worker hub; `WSTaskManager`; `StatusMsg`/`DoneMsg` |
-| `p03/internal/nats` | `manager.go`, `source.go`, `setup.go`, `store.go` | NATS manager, `NATSTaskSource`+`NATSSink` (both sinks), KV store |
-| `p04/internal/nats` | `setup.go`, `source.go` | JetStream setup + `NATSTaskSource` (injects `ProgressSink`+`ResultSink`) |
-| `p04/internal/redis` | `manager.go`, `sink.go`, `store.go` | `RedisSink` (implements both sinks), Redis store, SSE fan-out manager |
+| `p01/internal/bus` | `bus.go`, `worker.go` | `ChannelBus` (both `WorkerBus`+`WorkerSource`); `RunWorker`+`progressSink` |
+| `p02/internal/bus` | `bus.go` | `WebSocketBus` (WorkerBus): manages worker conns; readPump/writePump |
+| `p02/internal/worker` | `source.go` | `WebSocketSource` (WorkerSource): reconnect loop, `currentSend` indirection |
+| `p03/internal/nats` | `bus.go`, `source.go`, `setup.go`, `store.go` | `NATSBus`, `NATSSource`, JetStream setup, KV task store |
+| `p04/internal/bus` | `bus.go` | `NATSRedisBus` (WorkerBus): NATS JetStream dispatch + Redis PSubscribe |
+| `p04/internal/worker` | `source.go` | `NATSRedisSource` (WorkerSource): NATS JetStream pull + Redis Publish |
+| `p04/internal/nats` | `setup.go` | JetStream stream setup (unchanged) |
+| `p04/internal/redis` | `store.go` | `RedisTaskStore` (unchanged) |
 
 ## API Routes (`shared/api`)
 
@@ -37,18 +41,35 @@
 // dispatch/manager.go
 type TaskManager interface { Submit(ctx context.Context, task models.Task) error }
 
-// dispatch/source.go
-type TaskSource interface { Receive(ctx context.Context) (models.Task, ProgressSink, ResultSink, error) }
+// dispatch/bus.go — manager-side transport view
+type WorkerBus interface {
+    Start(ctx context.Context) error
+    Dispatch(ctx context.Context, task models.Task) error
+    ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error)   // blocks
+    ReceiveProgress(ctx context.Context) (models.ProgressEvent, error)  // blocks
+}
+var ErrDispatchFull = errors.New("dispatch queue full")   // → 429
+var ErrNoWorkers    = errors.New("no workers available")  // → 503
+
+// dispatch/worker_source.go — worker-side transport view
+type WorkerSource interface {
+    Connect(ctx context.Context) error
+    Receive(ctx context.Context) (models.Task, error)   // blocks
+    ReportResult(ctx context.Context, taskID string, status models.TaskStatus) error
+    ReportProgress(ctx context.Context, event models.ProgressEvent) error
+}
 
 // dispatch/sink.go — UX-only, best-effort
 type ProgressSink interface { Publish(event models.ProgressEvent) }
 
-// dispatch/result.go — reliable task-level status path
-type ResultSink interface { Record(taskID string, status models.TaskStatus) error }
+// manager/manager.go
+func New(s store.TaskStore, bus dispatch.WorkerBus, hub *sse.Hub, deadline time.Duration) *Manager
+func (m *Manager) Start(ctx context.Context)   // non-blocking; launches result/progress/deadline goroutines
+func (m *Manager) Submit(ctx context.Context, task models.Task) error
 
 // executor/executor.go
 type Executor struct { MaxStageDuration time.Duration }
-func (e *Executor) Run(ctx, task, sink dispatch.ProgressSink) models.TaskStatus  // returns terminal status; caller calls Record
+func (e *Executor) Run(ctx, task, sink dispatch.ProgressSink) models.TaskStatus
 
 // store/store.go
 type TaskStore interface {
@@ -57,20 +78,14 @@ type TaskStore interface {
     List() []models.Task
     SetStatus(id string, status models.TaskStatus) error
 }
-
-// models/task.go
-type Task struct { ID, Name string; Status TaskStatus; SubmittedAt time.Time; CompletedAt *time.Time; Stages []Stage }
-type Stage struct { Index int; Name string; Status StageStatus; Progress int }
-type ProgressEvent struct { TaskID string; StageIdx int; StageName string; Progress int; Status StageStatus }
-type TaskStatusEvent struct { TaskID string; Status TaskStatus }  // transport payload for task_status channels
 ```
 
 ## Pattern-Specific Notes
 
-**Pattern 1** — `PoolTaskManager.Submit` enqueues a closure. `poolResultSink` wraps `sse.Hub` + `store`. Calls `Record(TaskRunning)` before `exec.Run` and `Record(status)` after. `sse.Hub` is the `ProgressSink` directly.
+**Pattern 1** — `ChannelBus` implements both `WorkerBus` and `WorkerSource` (same process, shared channels). `RunWorker` loops: `Receive` → `exec.Run` → `ReportResult`. Deadline disabled (`deadline=0`). `progressSink` adapter forwards to `source.ReportProgress`.
 
-**Pattern 2** — `wsSink` implements both `ProgressSink` and `ResultSink`. `Receive` returns the task's paired `wsSink` as both sinks. `readPump` handles `status` (non-terminal) and `done` (terminal, uses `msg.Status`) WebSocket messages. Workers send `running` before `exec.Run` via `Record`.
+**Pattern 2** — `WebSocketBus.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. Message types unexported in each package (bus-side and worker-side) with matching JSON fields. `WebSocketSource` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Deadline disabled.
 
-**Pattern 3** — `NATSSink` implements both sinks. `NATSTaskSource` holds a `*NATSSink` injected at construction; returns it from `Receive` as both sinks. Manager subscribes to `task_status.*` using `models.TaskStatusEvent`. Workers call `Record(TaskRunning)` before `exec.Run` (synchronous, one task at a time).
+**Pattern 3** — `NATSBus.Start` NATS Core-subscribes to `progress.*`/`task_status.*`. `NATSSource.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s.
 
-**Pattern 4** — `RedisSink` implements both sinks. `NATSTaskSource` (P4) accepts `dispatch.ProgressSink`+`dispatch.ResultSink` interfaces at construction (no cross-package import). Manager subscribes to Redis `task_status:*` using `models.TaskStatusEvent`. Workers call `Record(TaskRunning)` before `exec.Run` (synchronous).
+**Pattern 4** — `NATSRedisBus.Start` uses Redis PSubscribe on `progress:*`/`task_status:*`. `NATSRedisSource.Connect` NATS JetStream queue-subscribes. Results/progress via `rdb.Publish`. Store is `RedisTaskStore`. Deadline 30 s.
