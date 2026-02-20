@@ -4,9 +4,9 @@ import (
 	"context"
 	"html/template"
 	"log"
-	"os"
-	"strconv"
 	"time"
+
+	"github.com/kelseyhightower/envconfig"
 
 	"work-distribution-patterns/patterns/01-goroutine-pool/internal/bus"
 	"work-distribution-patterns/shared/api"
@@ -17,23 +17,30 @@ import (
 	"work-distribution-patterns/shared/templates"
 )
 
+type config struct {
+	Addr             string `envconfig:"addr" default:":8080"`
+	Workers          int    `envconfig:"workers" default:"5"`
+	QueueSize        int    `envconfig:"queue_size" default:"20"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+
 func main() {
-	addr := envOr("ADDR", ":8080")
-	workers := envInt("WORKERS", 5)
-	queueSize := envInt("QUEUE_SIZE", 20)
-	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
+	var cfg config
+	if err := envconfig.Process("", &cfg); err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
 	ctx := context.Background()
 
 	hub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	exec := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
+	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	channelBus := bus.New(queueSize)
+	channelBus := bus.New(cfg.QueueSize)
 	mgr := manager.New(taskStore, channelBus, hub, 0) // deadline=0 disables re-dispatch
 	mgr.Start(ctx)
 
-	for i := 0; i < workers; i++ {
+	for i := 0; i < cfg.Workers; i++ {
 		go bus.RunWorker(ctx, channelBus, exec)
 	}
 
@@ -44,22 +51,6 @@ func main() {
 
 	e := api.NewRouter(taskStore, hub, tpl, mgr)
 	log.Printf("Pattern 1 (Goroutine Pool) listening on %s [workers=%d, queue=%d, maxStage=%s]",
-		addr, workers, queueSize, exec.MaxStageDuration)
-	log.Fatal(e.Start(addr))
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
+		cfg.Addr, cfg.Workers, cfg.QueueSize, exec.MaxStageDuration)
+	log.Fatal(e.Start(cfg.Addr))
 }

@@ -3,17 +3,22 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/kelseyhightower/envconfig"
 
 	"work-distribution-patterns/patterns/02-websocket-hub/internal/worker"
 	"work-distribution-patterns/shared/dispatch"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
+
+type config struct {
+	APIURL           string `envconfig:"api_url" default:"ws://localhost:8080/ws/register"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
 
 // progressSink adapts WebSocketSource into dispatch.ProgressSink for the executor.
 type progressSink struct {
@@ -26,14 +31,16 @@ func (s *progressSink) Publish(event models.ProgressEvent) {
 }
 
 func main() {
-	apiURL := envOr("API_URL", "ws://localhost:8080/ws/register")
-	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
+	var cfg config
+	if err := envconfig.Process("", &cfg); err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := worker.NewWebSocketSource(apiURL)
-	exec := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
+	source := worker.NewWebSocketSource(cfg.APIURL)
+	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	_ = source.Connect(ctx)
 
@@ -49,20 +56,4 @@ func main() {
 			_ = source.ReportResult(ctx, task.ID, status)
 		}()
 	}
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
 }

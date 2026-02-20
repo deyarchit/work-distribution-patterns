@@ -4,9 +4,9 @@ import (
 	"context"
 	"html/template"
 	"log"
-	"os"
 	"time"
 
+	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 
 	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
@@ -16,11 +16,18 @@ import (
 	"work-distribution-patterns/shared/templates"
 )
 
-func main() {
-	addr := envOr("ADDR", ":8080")
-	natsURL := envOr("NATS_URL", nats.DefaultURL)
+type config struct {
+	Addr    string `envconfig:"addr" default:":8080"`
+	NATSURL string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+}
 
-	nc, err := nats.Connect(natsURL,
+func main() {
+	var cfg config
+	if err := envconfig.Process("", &cfg); err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
+	nc, err := nats.Connect(cfg.NATSURL,
 		nats.MaxReconnects(-1),
 		nats.RetryOnFailedConnect(true),
 	)
@@ -55,13 +62,6 @@ func main() {
 	}
 
 	e := api.NewRouter(taskStore, hub, tpl, mgr)
-	log.Printf("Pattern 3 (NATS JetStream) API listening on %s", addr)
-	log.Fatal(e.Start(addr))
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+	log.Printf("Pattern 3 (NATS JetStream) API listening on %s", cfg.Addr)
+	log.Fatal(e.Start(cfg.Addr))
 }

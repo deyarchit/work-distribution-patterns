@@ -1,4 +1,4 @@
-<!-- Commit: 7fe066ab6730595a6c51680b8324893cbae27fa5 | Files scanned: 9 | Token estimate: ~490 -->
+<!-- Commit: 6780e92624254b744e0a20a07f22ed5341bd4371 | Files scanned: 9 | Token estimate: ~510 -->
 
 # Dependencies & Configuration
 
@@ -10,16 +10,20 @@
 | `github.com/gorilla/websocket` | v1.5.3 | WebSocket transport (Pattern 2) |
 | `github.com/nats-io/nats.go` | v1.48.0 | NATS JetStream client (Pattern 3) |
 | `github.com/google/uuid` | v1.6.0 | Task ID generation |
+| `github.com/kelseyhightower/envconfig` | v1.4.0 | Struct-based env config loading (all patterns) |
 
 ## Environment Variables
 
+All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `default:` tags.
+
 | Variable | Default | Pattern | Purpose |
 |----------|---------|---------|---------|
-| `ADDR` | `:8080` | All | Listen address for API/server |
+| `ADDR` | `:8080` | All API/server | Listen address |
 | `WORKERS` | `5` | P1 | Goroutine pool size |
 | `QUEUE_SIZE` | `20` | P1 | Max queued tasks before HTTP 429 |
-| `MAX_STAGE_DURATION` | `500` | P1, P2 worker | Max milliseconds per stage (randomized per stage) |
-| `NATS_URL` | `nats://localhost:4222` | P3 | NATS server URL |
+| `MAX_STAGE_DURATION` | `500` | P1, P2 worker, P3 worker | Max milliseconds per stage |
+| `API_URL` | `ws://localhost:8080/ws/register` | P2 worker | WebSocket registration endpoint |
+| `NATS_URL` | `nats://127.0.0.1:4222` | P3 | NATS server URL |
 
 ## Container Topology
 

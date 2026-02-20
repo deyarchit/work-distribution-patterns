@@ -5,9 +5,9 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/websocket"
+	"github.com/kelseyhightower/envconfig"
 	"github.com/labstack/echo/v4"
 
 	wsbus "work-distribution-patterns/patterns/02-websocket-hub/internal/bus"
@@ -18,6 +18,10 @@ import (
 	"work-distribution-patterns/shared/templates"
 )
 
+type config struct {
+	Addr string `envconfig:"addr" default:":8080"`
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -25,7 +29,10 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
-	addr := envOr("ADDR", ":8080")
+	var cfg config
+	if err := envconfig.Process("", &cfg); err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
 	sseHub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
@@ -50,13 +57,6 @@ func main() {
 		return nil
 	})
 
-	log.Printf("Pattern 2 (WebSocket Hub) API listening on %s", addr)
-	log.Fatal(e.Start(addr))
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+	log.Printf("Pattern 2 (WebSocket Hub) API listening on %s", cfg.Addr)
+	log.Fatal(e.Start(cfg.Addr))
 }

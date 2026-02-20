@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 
 	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
@@ -16,6 +15,11 @@ import (
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
+
+type config struct {
+	NATSURL          string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
 
 // progressSink adapts WorkerSource into dispatch.ProgressSink for the executor.
 type progressSink struct {
@@ -28,10 +32,12 @@ func (s *progressSink) Publish(event models.ProgressEvent) {
 }
 
 func main() {
-	natsURL := envOr("NATS_URL", nats.DefaultURL)
-	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
+	var cfg config
+	if err := envconfig.Process("", &cfg); err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
-	nc, err := nats.Connect(natsURL,
+	nc, err := nats.Connect(cfg.NATSURL,
 		nats.MaxReconnects(-1),
 		nats.RetryOnFailedConnect(true),
 	)
@@ -53,9 +59,9 @@ func main() {
 	defer stop()
 
 	source := natsinternal.NewNATSSource(nc, js)
-	exec := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
+	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	log.Printf("Pattern 3 worker listening on NATS %s", natsURL)
+	log.Printf("Pattern 3 worker listening on NATS %s", cfg.NATSURL)
 
 	_ = source.Connect(ctx)
 
@@ -72,20 +78,4 @@ func main() {
 		status := exec.Run(ctx, task, &progressSink{ctx: ctx, source: source})
 		_ = source.ReportResult(ctx, task.ID, status)
 	}
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
 }
