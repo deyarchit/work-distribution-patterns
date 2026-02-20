@@ -1,4 +1,4 @@
-package natsinternal
+package worker
 
 import (
 	"context"
@@ -6,44 +6,50 @@ import (
 	"log"
 
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 
+	natsinternal "work-distribution-patterns/patterns/04-nats-redis/internal/nats"
 	"work-distribution-patterns/shared/dispatch"
 	"work-distribution-patterns/shared/models"
 )
 
 // Compile-time interface check.
-var _ dispatch.WorkerSource = (*NATSSource)(nil)
+var _ dispatch.WorkerSource = (*NATSRedisSource)(nil)
 
-// NATSSource implements WorkerSource over NATS.
-// It receives tasks from JetStream (queue-subscribe with manual ACK for
-// at-least-once delivery) and reports results and progress via NATS Core.
+const (
+	progressPrefix   = "progress:"
+	taskStatusPrefix = "task_status:"
+)
+
+// NATSRedisSource implements WorkerSource using NATS JetStream to receive tasks
+// and Redis Pub/Sub to report results and progress.
 // The worker loop is synchronous — one task at a time — preserving NATS
 // at-least-once delivery semantics.
-type NATSSource struct {
-	nc    *nats.Conn
+type NATSRedisSource struct {
 	js    nats.JetStreamContext
+	rdb   *redis.Client
 	tasks chan models.Task
 }
 
-// NewNATSSource creates a NATSSource. Call Connect to start the subscription.
-func NewNATSSource(nc *nats.Conn, js nats.JetStreamContext) *NATSSource {
-	return &NATSSource{
-		nc:    nc,
+// New creates a NATSRedisSource. Call Connect to start the subscription.
+func New(js nats.JetStreamContext, rdb *redis.Client) *NATSRedisSource {
+	return &NATSRedisSource{
 		js:    js,
+		rdb:   rdb,
 		tasks: make(chan models.Task, 1),
 	}
 }
 
 // Connect starts the JetStream queue subscription in a background goroutine (non-blocking).
-func (s *NATSSource) Connect(ctx context.Context) error {
+func (s *NATSRedisSource) Connect(ctx context.Context) error {
 	go s.subscribe(ctx)
 	return nil
 }
 
-func (s *NATSSource) subscribe(ctx context.Context) {
+func (s *NATSRedisSource) subscribe(ctx context.Context) {
 	sub, err := s.js.QueueSubscribe(
 		"tasks.new",
-		ConsumerDur,
+		natsinternal.ConsumerDur,
 		func(msg *nats.Msg) {
 			var task models.Task
 			if err := json.Unmarshal(msg.Data, &task); err != nil {
@@ -63,7 +69,7 @@ func (s *NATSSource) subscribe(ctx context.Context) {
 			case <-ctx.Done():
 			}
 		},
-		nats.Durable(ConsumerDur),
+		nats.Durable(natsinternal.ConsumerDur),
 		nats.ManualAck(),
 	)
 	if err != nil {
@@ -81,7 +87,7 @@ func (s *NATSSource) subscribe(ctx context.Context) {
 }
 
 // Receive blocks until a task is available or ctx is cancelled.
-func (s *NATSSource) Receive(ctx context.Context) (models.Task, error) {
+func (s *NATSRedisSource) Receive(ctx context.Context) (models.Task, error) {
 	select {
 	case <-ctx.Done():
 		return models.Task{}, ctx.Err()
@@ -90,22 +96,22 @@ func (s *NATSSource) Receive(ctx context.Context) (models.Task, error) {
 	}
 }
 
-// ReportResult publishes a task status event to "task_status.<taskID>" via NATS Core.
-// All API replicas subscribe to this subject.
-func (s *NATSSource) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
+// ReportResult publishes a task status event to "task_status:<taskID>" via Redis Pub/Sub.
+// All API replicas subscribe to this channel.
+func (s *NATSRedisSource) ReportResult(ctx context.Context, taskID string, status models.TaskStatus) error {
 	payload := models.TaskStatusEvent{TaskID: taskID, Status: status}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	return s.nc.Publish("task_status."+taskID, data)
+	return s.rdb.Publish(ctx, taskStatusPrefix+taskID, data).Err()
 }
 
-// ReportProgress publishes a progress event to "progress.<taskID>" via NATS Core.
-func (s *NATSSource) ReportProgress(_ context.Context, event models.ProgressEvent) error {
+// ReportProgress publishes a progress event to "progress:<taskID>" via Redis Pub/Sub.
+func (s *NATSRedisSource) ReportProgress(ctx context.Context, event models.ProgressEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	return s.nc.Publish("progress."+event.TaskID, data)
+	return s.rdb.Publish(ctx, progressPrefix+event.TaskID, data).Err()
 }

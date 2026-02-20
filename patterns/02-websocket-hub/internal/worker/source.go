@@ -5,40 +5,78 @@ import (
 	"encoding/json"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
-	wsapi "work-distribution-patterns/patterns/02-websocket-hub/internal/api"
 	"work-distribution-patterns/shared/dispatch"
 	"work-distribution-patterns/shared/models"
 )
 
-// sinkTask pairs an incoming task with the sink for the connection it arrived on.
-type sinkTask struct {
-	task models.Task
-	sink *wsSink
+// Compile-time interface check.
+var _ dispatch.WorkerSource = (*WebSocketSource)(nil)
+
+// Message type constants — must match the API bus protocol.
+const (
+	msgTypeReady    = "ready"
+	msgTypeTask     = "task"
+	msgTypeProgress = "progress"
+	msgTypeStatus   = "status"
+	msgTypeDone     = "done"
+)
+
+// Unexported message types for JSON marshaling/unmarshaling.
+type genericMsg struct {
+	Type string `json:"type"`
+}
+type readyMsg struct {
+	Type string `json:"type"`
+}
+type taskMsg struct {
+	Type string      `json:"type"`
+	Task models.Task `json:"task"`
+}
+type progressMsg struct {
+	Type  string               `json:"type"`
+	Event models.ProgressEvent `json:"event"`
+}
+type statusMsg struct {
+	Type   string            `json:"type"`
+	TaskID string            `json:"taskId"`
+	Status models.TaskStatus `json:"status"`
+}
+type doneMsg struct {
+	Type   string            `json:"type"`
+	TaskID string            `json:"taskId"`
+	Status models.TaskStatus `json:"status"`
 }
 
-// WSTaskSource implements dispatch.TaskSource over a WebSocket connection.
-// Call Connect in a goroutine to start the reconnect loop; call Receive to
-// pull tasks one at a time.
-type WSTaskSource struct {
-	apiURL string
-	tasks  chan sinkTask
+// WebSocketSource implements dispatch.WorkerSource over a WebSocket connection
+// to the API. Connect starts the reconnect loop (non-blocking); Receive blocks
+// until a task arrives.
+type WebSocketSource struct {
+	apiURL      string
+	tasks       chan models.Task
+	mu          sync.Mutex
+	currentSend chan []byte // guarded by mu; nil when disconnected
 }
 
-// NewWSTaskSource creates a WSTaskSource that connects to the given WebSocket URL.
-func NewWSTaskSource(apiURL string) *WSTaskSource {
-	return &WSTaskSource{
+// NewWebSocketSource creates a WebSocketSource that connects to the given URL.
+func NewWebSocketSource(apiURL string) *WebSocketSource {
+	return &WebSocketSource{
 		apiURL: apiURL,
-		tasks:  make(chan sinkTask, 1),
+		tasks:  make(chan models.Task, 1),
 	}
 }
 
-// Connect runs the reconnect loop until ctx is cancelled.
-// It should be called in a goroutine by the caller.
-func (s *WSTaskSource) Connect(ctx context.Context) {
+// Connect starts the reconnect loop in a background goroutine (non-blocking).
+func (s *WebSocketSource) Connect(ctx context.Context) error {
+	go s.reconnectLoop(ctx)
+	return nil
+}
+
+func (s *WebSocketSource) reconnectLoop(ctx context.Context) {
 	for attempt := 0; ; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -65,30 +103,82 @@ func (s *WSTaskSource) Connect(ctx context.Context) {
 		log.Println("connected to API")
 		attempt = 0
 
-		if err := s.runConn(ctx, conn); err != nil {
+		send := make(chan []byte, 128)
+		s.mu.Lock()
+		s.currentSend = send
+		s.mu.Unlock()
+
+		if err := s.runConn(ctx, conn, send); err != nil {
 			log.Printf("connection error: %v", err)
 		}
+
+		s.mu.Lock()
+		s.currentSend = nil
+		s.mu.Unlock()
 	}
 }
 
-// Receive implements dispatch.TaskSource.
-// Blocks until a task is available or ctx is cancelled.
-// Returns the task along with the connection-scoped ProgressSink and ResultSink.
-func (s *WSTaskSource) Receive(ctx context.Context) (models.Task, dispatch.ProgressSink, dispatch.ResultSink, error) {
+// Receive blocks until a task is available or ctx is cancelled.
+func (s *WebSocketSource) Receive(ctx context.Context) (models.Task, error) {
 	select {
 	case <-ctx.Done():
-		return models.Task{}, nil, nil, ctx.Err()
-	case st := <-s.tasks:
-		return st.task, st.sink, st.sink, nil
+		return models.Task{}, ctx.Err()
+	case task := <-s.tasks:
+		return task, nil
 	}
 }
 
-// runConn handles one connection lifecycle: write pump, read loop, task dispatch.
-func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error {
-	send := make(chan []byte, 128)
+// ReportResult sends a task status event to the API over WebSocket.
+// Terminal statuses use DoneMsg; non-terminal statuses use StatusMsg.
+func (s *WebSocketSource) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
+	var msg any
+	if status == models.TaskCompleted || status == models.TaskFailed {
+		msg = doneMsg{Type: msgTypeDone, TaskID: taskID, Status: status}
+	} else {
+		msg = statusMsg{Type: msgTypeStatus, TaskID: taskID, Status: status}
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	send := s.currentSend
+	s.mu.Unlock()
+	if send == nil {
+		return nil
+	}
+	select {
+	case send <- data:
+	default:
+	}
+	return nil
+}
+
+// ReportProgress sends a stage progress event to the API over WebSocket.
+// Events are best-effort and may be dropped if the send buffer is full.
+func (s *WebSocketSource) ReportProgress(_ context.Context, event models.ProgressEvent) error {
+	data, err := json.Marshal(progressMsg{Type: msgTypeProgress, Event: event})
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	send := s.currentSend
+	s.mu.Unlock()
+	if send == nil {
+		return nil
+	}
+	select {
+	case send <- data:
+	default:
+	}
+	return nil
+}
+
+// runConn manages one connection lifecycle: write pump + read loop.
+func (s *WebSocketSource) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error {
 	done := make(chan struct{})
 
-	// Write pump — only goroutine allowed to write to conn.
+	// Write pump — only goroutine that writes to conn.
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(30 * time.Second)
@@ -114,10 +204,8 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 		}
 	}()
 
-	ready, _ := json.Marshal(wsapi.ReadyMsg{Type: wsapi.MsgTypeReady})
+	ready, _ := json.Marshal(readyMsg{Type: msgTypeReady})
 	send <- ready
-
-	sink := &wsSink{send: send}
 
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
@@ -147,20 +235,20 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
-		var generic wsapi.GenericMsg
-		if err := json.Unmarshal(raw, &generic); err != nil {
+		var gm genericMsg
+		if err := json.Unmarshal(raw, &gm); err != nil {
 			continue
 		}
 
-		if generic.Type == wsapi.MsgTypeTask {
-			var msg wsapi.TaskMsg
+		if gm.Type == msgTypeTask {
+			var msg taskMsg
 			if err := json.Unmarshal(raw, &msg); err != nil {
 				log.Printf("unmarshal task: %v", err)
 				continue
 			}
 			log.Printf("received task %s (%d stages)", msg.Task.ID, len(msg.Task.Stages))
 			select {
-			case s.tasks <- sinkTask{task: msg.Task, sink: sink}:
+			case s.tasks <- msg.Task:
 			case <-ctx.Done():
 				close(send)
 				<-done
@@ -170,47 +258,3 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 		}
 	}
 }
-
-// wsSink sends progress and status events back to the API over WebSocket.
-// It implements both dispatch.ProgressSink (stage events) and dispatch.ResultSink (task status).
-type wsSink struct {
-	send chan []byte
-}
-
-func (s *wsSink) Publish(event models.ProgressEvent) {
-	msg := wsapi.ProgressMsg{
-		Type:  wsapi.MsgTypeProgress,
-		Event: event,
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	select {
-	case s.send <- data:
-	default:
-	}
-}
-
-func (s *wsSink) Record(taskID string, status models.TaskStatus) error {
-	var msg any
-	if status == models.TaskCompleted || status == models.TaskFailed {
-		msg = wsapi.DoneMsg{Type: wsapi.MsgTypeDone, TaskID: taskID, Status: status}
-	} else {
-		msg = wsapi.StatusMsg{Type: wsapi.MsgTypeStatus, TaskID: taskID, Status: status}
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	select {
-	case s.send <- data:
-	default:
-	}
-	return nil
-}
-
-// Compile-time interface checks.
-var _ dispatch.ProgressSink = (*wsSink)(nil)
-var _ dispatch.ResultSink = (*wsSink)(nil)
-var _ dispatch.TaskSource = (*WSTaskSource)(nil)

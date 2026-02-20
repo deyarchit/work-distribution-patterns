@@ -10,9 +10,20 @@ import (
 	"time"
 
 	"work-distribution-patterns/patterns/02-websocket-hub/internal/worker"
+	"work-distribution-patterns/shared/dispatch"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
+
+// progressSink adapts WebSocketSource into dispatch.ProgressSink for the executor.
+type progressSink struct {
+	ctx    context.Context
+	source dispatch.WorkerSource
+}
+
+func (s *progressSink) Publish(event models.ProgressEvent) {
+	_ = s.source.ReportProgress(s.ctx, event)
+}
 
 func main() {
 	apiURL := envOr("API_URL", "ws://localhost:8080/ws/register")
@@ -21,21 +32,21 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := worker.NewWSTaskSource(apiURL)
+	source := worker.NewWebSocketSource(apiURL)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
 
-	go source.Connect(ctx)
+	_ = source.Connect(ctx)
 
 	for {
-		task, progressSink, resultSink, err := source.Receive(ctx)
+		task, err := source.Receive(ctx)
 		if err != nil {
 			log.Printf("worker stopped: %v", err)
 			return
 		}
 		go func() {
-			_ = resultSink.Record(task.ID, models.TaskRunning)
-			status := exec.Run(ctx, task, progressSink)
-			_ = resultSink.Record(task.ID, status)
+			_ = source.ReportResult(ctx, task.ID, models.TaskRunning)
+			status := exec.Run(ctx, task, &progressSink{ctx: ctx, source: source})
+			_ = source.ReportResult(ctx, task.ID, status)
 		}()
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"html/template"
 	"log"
 	"net/http"
@@ -9,8 +10,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	wsapi "work-distribution-patterns/patterns/02-websocket-hub/internal/api"
+	wsbus "work-distribution-patterns/patterns/02-websocket-hub/internal/bus"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
 	"work-distribution-patterns/shared/templates"
@@ -27,23 +29,24 @@ func main() {
 
 	sseHub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	workerHub := wsapi.NewWorkerHub(sseHub, taskStore)
-	manager := wsapi.NewWSTaskManager(workerHub, taskStore)
+	workerBus := wsbus.NewWebSocketBus()
+	mgr := manager.New(taskStore, workerBus, sseHub, 0) // deadline=0; workers always connected
+	mgr.Start(context.Background())
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, sseHub, tpl, manager)
+	e := api.NewRouter(taskStore, sseHub, tpl, mgr)
 
-	// Register worker WebSocket endpoint
+	// Worker WebSocket registration endpoint.
 	e.GET("/ws/register", func(c echo.Context) error {
 		conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 		if err != nil {
 			return err
 		}
-		workerHub.Register(conn)
+		workerBus.Register(conn)
 		return nil
 	})
 
