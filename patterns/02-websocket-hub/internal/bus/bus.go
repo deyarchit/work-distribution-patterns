@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"work-distribution-patterns/shared/dispatch"
+	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
 )
 

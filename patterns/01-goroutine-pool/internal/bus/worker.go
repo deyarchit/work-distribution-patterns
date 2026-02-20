@@ -3,7 +3,7 @@ package bus
 import (
 	"context"
 
-	"work-distribution-patterns/shared/dispatch"
+	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
@@ -12,7 +12,7 @@ import (
 // so the executor can report stage progress back through the source.
 type progressSink struct {
 	ctx    context.Context
-	source dispatch.WorkerSource
+	source contracts.WorkerSource
 }
 
 func (s progressSink) Publish(event models.ProgressEvent) {
@@ -22,7 +22,7 @@ func (s progressSink) Publish(event models.ProgressEvent) {
 // RunWorker loops indefinitely, pulling tasks from source, executing them,
 // and reporting status and progress back. It exits when ctx is cancelled.
 // Each call to RunWorker should run in its own goroutine.
-func RunWorker(ctx context.Context, source dispatch.WorkerSource, exec *executor.Executor) {
+func RunWorker(ctx context.Context, source contracts.WorkerSource, exec *executor.Executor) {
 	for {
 		task, err := source.Receive(ctx)
 		if err != nil {

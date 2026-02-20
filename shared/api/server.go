@@ -6,7 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"work-distribution-patterns/shared/dispatch"
+	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
 )
@@ -16,7 +16,7 @@ func NewRouter(
 	taskStore store.TaskStore,
 	hub *sse.Hub,
 	tpl *template.Template,
-	manager dispatch.TaskManager,
+	manager contracts.TaskManager,
 ) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true

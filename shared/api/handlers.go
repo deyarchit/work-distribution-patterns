@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"work-distribution-patterns/shared/dispatch"
+	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
@@ -21,7 +21,7 @@ type submitRequest struct {
 
 // SubmitTask handles POST /tasks.
 // The task manager is responsible for persisting the task and dispatching it.
-func SubmitTask(manager dispatch.TaskManager) echo.HandlerFunc {
+func SubmitTask(manager contracts.TaskManager) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		var req submitRequest
 		if err := c.Bind(&req); err != nil {

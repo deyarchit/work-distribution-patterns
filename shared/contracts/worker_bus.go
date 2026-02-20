@@ -1,4 +1,4 @@
-package dispatch
+package contracts
 
 import (
 	"context"

@@ -3,7 +3,7 @@ package bus
 import (
 	"context"
 
-	"work-distribution-patterns/shared/dispatch"
+	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
 )
 

@@ -11,7 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
-	"work-distribution-patterns/shared/dispatch"
+	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )

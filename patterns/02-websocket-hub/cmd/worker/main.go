@@ -10,7 +10,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 
 	"work-distribution-patterns/patterns/02-websocket-hub/internal/worker"
-	"work-distribution-patterns/shared/dispatch"
+	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )

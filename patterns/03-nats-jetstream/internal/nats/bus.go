@@ -7,7 +7,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"work-distribution-patterns/shared/dispatch"
+	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
 )
 
