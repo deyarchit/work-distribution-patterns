@@ -118,3 +118,11 @@ func Index(tpl *template.Template) echo.HandlerFunc {
 		return tpl.ExecuteTemplate(c.Response().Writer, "index.html", nil)
 	}
 }
+
+// Health handles GET /health — used by Docker health checks.
+// Registered before the logger middleware so health poll traffic is not logged.
+func Health() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	}
+}

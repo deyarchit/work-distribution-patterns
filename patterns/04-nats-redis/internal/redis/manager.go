@@ -62,10 +62,7 @@ func NewRedisTaskManager(ctx context.Context, js nats.JetStreamContext, rdb *red
 						hub.Publish(ev)
 					}
 				case len(msg.Channel) > len(taskStatusPrefix) && msg.Channel[:len(taskStatusPrefix)] == taskStatusPrefix:
-					var payload struct {
-						TaskID string            `json:"taskID"`
-						Status models.TaskStatus `json:"status"`
-					}
+					var payload models.TaskStatusEvent
 					if err := json.Unmarshal([]byte(msg.Payload), &payload); err == nil {
 						hub.PublishTaskStatus(payload.TaskID, payload.Status)
 						if err := taskStore.SetStatus(payload.TaskID, payload.Status); err != nil {

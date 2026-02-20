@@ -13,6 +13,18 @@ import (
 	"work-distribution-patterns/shared/store"
 )
 
+// poolResultSink routes task-level status to the SSE hub (for browser updates)
+// and persists it to the store (for the /tasks endpoint).
+type poolResultSink struct {
+	hub   *sse.Hub
+	store store.TaskStore
+}
+
+func (s *poolResultSink) Record(taskID string, status models.TaskStatus) error {
+	s.hub.PublishTaskStatus(taskID, status)
+	return s.store.SetStatus(taskID, status)
+}
+
 // PoolTaskManager implements dispatch.TaskManager using the bounded goroutine pool.
 // It owns the full task lifecycle: persisting to the store, enqueuing execution,
 // routing progress to the SSE hub, and persisting the terminal status.
@@ -38,9 +50,10 @@ func (m *PoolTaskManager) Submit(ctx context.Context, task models.Task) error {
 	err := m.pool.Enqueue(func() {
 		// Use background context so the task completes even if the HTTP request is cancelled.
 		// The hub is passed directly as the ProgressSink — it handles SSE broadcast.
-		// The returned status is used to persist the terminal state; no sink wrapping needed.
+		rs := &poolResultSink{hub: m.hub, store: m.store}
+		_ = rs.Record(task.ID, models.TaskRunning)
 		status := m.exec.Run(context.Background(), task, m.hub)
-		_ = m.store.SetStatus(task.ID, status)
+		_ = rs.Record(task.ID, status)
 	})
 	if errors.Is(err, ErrQueueFull) {
 		_ = m.store.SetStatus(task.ID, models.TaskFailed)

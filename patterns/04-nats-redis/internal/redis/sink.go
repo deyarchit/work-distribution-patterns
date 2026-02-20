@@ -7,15 +7,15 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/dispatch"
 	"work-distribution-patterns/shared/models"
 )
 
-// RedisSink implements executor.ProgressSink by publishing progress events to
-// Redis Pub/Sub. All API replicas subscribe to these channels, so every SSE hub
-// is updated regardless of which replica the browser is connected to.
-// Workers use RedisSink instead of a NATS sink so that the API layer — not the
-// transport layer — owns the cross-replica fan-out responsibility.
+// RedisSink implements dispatch.ProgressSink and dispatch.ResultSink by publishing
+// progress events and task status to Redis Pub/Sub. All API replicas subscribe to
+// these channels, so every SSE hub is updated regardless of which replica the browser
+// is connected to. Workers use RedisSink instead of a NATS sink so that the API
+// layer — not the transport layer — owns the cross-replica fan-out responsibility.
 type RedisSink struct {
 	rdb *redis.Client
 }
@@ -35,19 +35,15 @@ func (s *RedisSink) Publish(event models.ProgressEvent) {
 	}
 }
 
-func (s *RedisSink) PublishTaskStatus(taskID string, status models.TaskStatus) {
-	payload := struct {
-		TaskID string            `json:"taskID"`
-		Status models.TaskStatus `json:"status"`
-	}{TaskID: taskID, Status: status}
+func (s *RedisSink) Record(taskID string, status models.TaskStatus) error {
+	payload := models.TaskStatusEvent{TaskID: taskID, Status: status}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return err
 	}
-	if err := s.rdb.Publish(context.Background(), taskStatusPrefix+taskID, data).Err(); err != nil {
-		log.Printf("sink: publish task status error: %v", err)
-	}
+	return s.rdb.Publish(context.Background(), taskStatusPrefix+taskID, data).Err()
 }
 
-// Compile-time interface check.
-var _ executor.ProgressSink = (*RedisSink)(nil)
+// Compile-time interface checks.
+var _ dispatch.ProgressSink = (*RedisSink)(nil)
+var _ dispatch.ResultSink = (*RedisSink)(nil)

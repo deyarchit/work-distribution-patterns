@@ -24,3 +24,30 @@ Commits: `9d2e9eb..df20ceb` (+ uncommitted Pattern 4 work)
 - **`RedisTaskStore` uses Set + String**: `tasks:all` Set holds IDs for `List()` without
   a full scan; each task is a JSON String with 24 h TTL — mirrors the JetStreamStore KV
   approach from Pattern 3.
+
+## 7fe066a — 2026-02-20
+Commits: `40c16d7..7fe066a`
+
+### Decisions
+- **`ProgressSink` / `ResultSink` split**: The original `executor.ProgressSink` conflated
+  stage progress (best-effort UX) with task-level status (reliable, determines final state).
+  Splitting into two interfaces in `dispatch` lets readers immediately see which path is
+  reliable and which is fire-and-forget. `executor` now has no task-status responsibility.
+
+- **`ResultSink.Record` not `Publish`**: Go prohibits a type having two methods with the
+  same name and different signatures. Transport types (`wsSink`, `NATSSink`, `RedisSink`)
+  implement both interfaces simultaneously — `Record` prevents a name collision with
+  `ProgressSink.Publish`.
+
+- **`Receive` returns `(Task, ProgressSink, ResultSink, error)`**: Eliminated the
+  `WSTaskSource.Sink()` side-channel (implicit ordering: call `Sink()` immediately after
+  `Receive` or get wrong sink). Returning sinks directly from `Receive` makes the pairing
+  enforced by the type system rather than by convention.
+
+- **`DoneMsg` `Status` field + `StatusMsg` type (P2 bug fix)**: `readPump` was hardcoding
+  `models.TaskCompleted` for all `done` messages — failed tasks appeared as completed.
+  Added `Status` field to `DoneMsg`; added `StatusMsg` for non-terminal `running` status.
+
+- **NATS `nats.conf` for P3/P4**: NATS 2.12+ changed JetStream defaults — `Max Storage: 0 B`
+  without explicit config. Running with `-js` flag alone disables file storage. Explicit
+  `nats.conf` with `max_file_store: 1GB` and a named Docker volume is required.

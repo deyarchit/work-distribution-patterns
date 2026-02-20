@@ -20,8 +20,16 @@ func NewRouter(
 ) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
-	e.Use(middleware.Logger()) //nolint:staticcheck // deprecated but still functional; sufficient for demo
+
+	// Logger skips /health so frequent health-check polls don't flood the log.
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
+		Skipper: func(c echo.Context) bool {
+			return c.Request().URL.Path == "/health"
+		},
+	}))
 	e.Use(middleware.Recover())
+
+	e.GET("/health", Health())
 
 	// Attach template to context for HTMX fragment rendering
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {

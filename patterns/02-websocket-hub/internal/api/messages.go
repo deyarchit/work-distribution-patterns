@@ -8,6 +8,7 @@ const (
 	MsgTypeTask     = "task"
 	MsgTypeProgress = "progress"
 	MsgTypeDone     = "done"
+	MsgTypeStatus   = "status" // non-terminal task status (e.g. "running")
 )
 
 // ReadyMsg is sent by the worker to signal it is available.
@@ -28,10 +29,18 @@ type ProgressMsg struct {
 	Event models.ProgressEvent `json:"event"`
 }
 
-// DoneMsg is sent by the worker when the task is fully complete.
+// StatusMsg carries a non-terminal task status from worker to API.
+type StatusMsg struct {
+	Type   string            `json:"type"` // "status"
+	TaskID string            `json:"taskId"`
+	Status models.TaskStatus `json:"status"`
+}
+
+// DoneMsg carries the terminal task status from worker to API.
 type DoneMsg struct {
-	Type   string `json:"type"` // "done"
-	TaskID string `json:"taskId"`
+	Type   string            `json:"type"` // "done"
+	TaskID string            `json:"taskId"`
+	Status models.TaskStatus `json:"status"`
 }
 
 // GenericMsg is used to decode the type field before further unmarshaling.

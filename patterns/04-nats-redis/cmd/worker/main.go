@@ -15,6 +15,7 @@ import (
 	natsinternal "work-distribution-patterns/patterns/04-nats-redis/internal/nats"
 	redisinternal "work-distribution-patterns/patterns/04-nats-redis/internal/redis"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/models"
 )
 
 func main() {
@@ -50,8 +51,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := natsinternal.NewNATSTaskSource(js)
 	sink := redisinternal.NewRedisSink(rdb)
+	source := natsinternal.NewNATSTaskSource(js, sink, sink) // sink satisfies both interfaces
 	exec := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
 
 	log.Printf("Pattern 4 worker: NATS %s | Redis %s", natsURL, redisAddr)
@@ -59,7 +60,7 @@ func main() {
 	go source.Connect(ctx)
 
 	for {
-		task, err := source.Receive(ctx)
+		task, progressSink, resultSink, err := source.Receive(ctx)
 		if err != nil {
 			log.Printf("worker stopped: %v", err)
 			return
@@ -67,7 +68,9 @@ func main() {
 		// Synchronous: exec.Run completes before we receive the next task,
 		// preserving NATS at-least-once delivery (ACK happens in Connect after
 		// the task is delivered to Receive).
-		exec.Run(ctx, task, sink)
+		_ = resultSink.Record(task.ID, models.TaskRunning)
+		status := exec.Run(ctx, task, progressSink)
+		_ = resultSink.Record(task.ID, status)
 	}
 }
 

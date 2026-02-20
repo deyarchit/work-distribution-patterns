@@ -15,15 +15,21 @@ import (
 // Call Connect in a goroutine to start the queue subscription; call Receive
 // to pull tasks one at a time.
 type NATSTaskSource struct {
-	js    nats.JetStreamContext
-	tasks chan models.Task
+	js           nats.JetStreamContext
+	tasks        chan models.Task
+	progressSink dispatch.ProgressSink
+	resultSink   dispatch.ResultSink
 }
 
-// NewNATSTaskSource creates a NATSTaskSource using the given JetStream context.
-func NewNATSTaskSource(js nats.JetStreamContext) *NATSTaskSource {
+// NewNATSTaskSource creates a NATSTaskSource using the given JetStream context and sinks.
+// The same RedisSink satisfies both ProgressSink and ResultSink and is injected here
+// to avoid a cross-package import on the concrete type.
+func NewNATSTaskSource(js nats.JetStreamContext, progressSink dispatch.ProgressSink, resultSink dispatch.ResultSink) *NATSTaskSource {
 	return &NATSTaskSource{
-		js:    js,
-		tasks: make(chan models.Task, 1),
+		js:           js,
+		tasks:        make(chan models.Task, 1),
+		progressSink: progressSink,
+		resultSink:   resultSink,
 	}
 }
 
@@ -71,12 +77,13 @@ func (s *NATSTaskSource) Connect(ctx context.Context) {
 
 // Receive implements dispatch.TaskSource.
 // Blocks until a task is available or ctx is cancelled.
-func (s *NATSTaskSource) Receive(ctx context.Context) (models.Task, error) {
+// Returns the fixed process-level sinks as ProgressSink and ResultSink.
+func (s *NATSTaskSource) Receive(ctx context.Context) (models.Task, dispatch.ProgressSink, dispatch.ResultSink, error) {
 	select {
 	case <-ctx.Done():
-		return models.Task{}, ctx.Err()
+		return models.Task{}, nil, nil, ctx.Err()
 	case task := <-s.tasks:
-		return task, nil
+		return task, s.progressSink, s.resultSink, nil
 	}
 }
 

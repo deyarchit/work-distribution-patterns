@@ -8,7 +8,6 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"work-distribution-patterns/shared/dispatch"
-	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
 
@@ -18,13 +17,15 @@ import (
 type NATSTaskSource struct {
 	js    nats.JetStreamContext
 	tasks chan models.Task
+	sink  *NATSSink // fixed for this process; satisfies both ProgressSink and ResultSink
 }
 
-// NewNATSTaskSource creates a NATSTaskSource using the given JetStream context.
-func NewNATSTaskSource(js nats.JetStreamContext) *NATSTaskSource {
+// NewNATSTaskSource creates a NATSTaskSource using the given JetStream context and sink.
+func NewNATSTaskSource(js nats.JetStreamContext, sink *NATSSink) *NATSTaskSource {
 	return &NATSTaskSource{
 		js:    js,
 		tasks: make(chan models.Task, 1),
+		sink:  sink,
 	}
 }
 
@@ -72,16 +73,17 @@ func (s *NATSTaskSource) Connect(ctx context.Context) {
 
 // Receive implements dispatch.TaskSource.
 // Blocks until a task is available or ctx is cancelled.
-func (s *NATSTaskSource) Receive(ctx context.Context) (models.Task, error) {
+// Returns the fixed process-level sink as both ProgressSink and ResultSink.
+func (s *NATSTaskSource) Receive(ctx context.Context) (models.Task, dispatch.ProgressSink, dispatch.ResultSink, error) {
 	select {
 	case <-ctx.Done():
-		return models.Task{}, ctx.Err()
+		return models.Task{}, nil, nil, ctx.Err()
 	case task := <-s.tasks:
-		return task, nil
+		return task, s.sink, s.sink, nil
 	}
 }
 
-// NATSSink publishes progress events back to the API via NATS Core subjects.
+// NATSSink publishes progress events and task status back to the API via NATS Core subjects.
 // All API replicas subscribe to these subjects, so all SSE hubs are updated.
 // It is independent of any specific task source and can be constructed once.
 type NATSSink struct {
@@ -103,20 +105,16 @@ func (s *NATSSink) Publish(event models.ProgressEvent) {
 	}
 }
 
-func (s *NATSSink) PublishTaskStatus(taskID string, status models.TaskStatus) {
-	payload := struct {
-		TaskID string            `json:"taskID"`
-		Status models.TaskStatus `json:"status"`
-	}{TaskID: taskID, Status: status}
+func (s *NATSSink) Record(taskID string, status models.TaskStatus) error {
+	payload := models.TaskStatusEvent{TaskID: taskID, Status: status}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return err
 	}
-	if err := s.nc.Publish("task_status."+taskID, data); err != nil {
-		log.Printf("publish task status error: %v", err)
-	}
+	return s.nc.Publish("task_status."+taskID, data)
 }
 
 // Compile-time interface checks.
-var _ executor.ProgressSink = (*NATSSink)(nil)
+var _ dispatch.ProgressSink = (*NATSSink)(nil)
+var _ dispatch.ResultSink = (*NATSSink)(nil)
 var _ dispatch.TaskSource = (*NATSTaskSource)(nil)

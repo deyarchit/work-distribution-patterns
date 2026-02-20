@@ -85,3 +85,10 @@ type ProgressEvent struct {
 	Progress  int         `json:"progress"`
 	Status    StageStatus `json:"status"`
 }
+
+// TaskStatusEvent is the payload for task_status transport channels
+// (NATS Core "task_status.<id>", Redis Pub/Sub "task_status:<id>").
+type TaskStatusEvent struct {
+	TaskID string     `json:"taskID"`
+	Status TaskStatus `json:"status"`
+}

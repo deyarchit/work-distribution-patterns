@@ -1,4 +1,4 @@
-<!-- Commit: df20ceb2bcbfbc77dba582b5941ded7dc533bfd5 | Files scanned: 53 | Token estimate: ~700 -->
+<!-- Commit: 7fe066ab6730595a6c51680b8324893cbae27fa5 | Files scanned: 57 | Token estimate: ~730 -->
 
 # Architecture
 
@@ -9,11 +9,14 @@ Four patterns demonstrating different work distribution topologies, all sharing 
 ## Shared Interfaces
 
 ```
-dispatch.TaskManager  Submit(ctx, task) error                         — API → execution substrate
-dispatch.TaskSource   Receive(ctx) (Task, error)                      — worker pulls from transport
-executor.ProgressSink Publish(event) / PublishTaskStatus(id, status)  — executor → transport
-store.TaskStore       Create/Get/List/SetStatus                        — task persistence
+dispatch.TaskManager   Submit(ctx, task) error                                              — API → execution substrate
+dispatch.TaskSource    Receive(ctx) (Task, ProgressSink, ResultSink, error)                 — worker pulls task + paired sinks
+dispatch.ProgressSink  Publish(event)                                                       — stage progress (UX, best-effort)
+dispatch.ResultSink    Record(taskID, status) error                                         — task status transitions (reliable)
+store.TaskStore        Create/Get/List/SetStatus                                            — task persistence
 ```
+
+`ProgressSink` and `ResultSink` are always returned paired with the task from `Receive`. Each transport type (`wsSink`, `NATSSink`, `RedisSink`) implements both, so a single value satisfies both interfaces. In P1 the caller constructs `poolResultSink` explicitly (no `TaskSource`).
 
 ## Pattern 1: Goroutine Pool (single process)
 

@@ -1,4 +1,4 @@
-<!-- Commit: df20ceb2bcbfbc77dba582b5941ded7dc533bfd5 | Files scanned: 7 | Token estimate: ~480 -->
+<!-- Commit: 7fe066ab6730595a6c51680b8324893cbae27fa5 | Files scanned: 9 | Token estimate: ~490 -->
 
 # Dependencies & Configuration
 
@@ -43,17 +43,19 @@ Workers connect to API via `ws://api:8080/ws/register`.
 [nginx]        ← nginx/nginx.conf   (port 8080 → upstream api)
   ├─ [api ×3] ← Dockerfile.api
   └─ [worker ×3] ← Dockerfile.worker
-[nats]         ← nats:latest        (JetStream enabled)
+[nats]         ← nats:latest + nats.conf (explicit max_file_store: 1GB, store_dir: /data/jetstream)
+               ← named volume: nats-jetstream
 ```
 No sticky sessions: all API replicas subscribe to `progress.*` and `task_status.*` on NATS Core.
 `JetStreamStore` uses NATS KV bucket (`tasks`) as shared state across API replicas.
+**Note:** `nats.conf` is required — NATS 2.12+ defaults `Max Storage: 0 B` without explicit config.
 
 ### Pattern 4 — Docker Compose
 ```
 [nginx]        ← nginx/nginx.conf   (port 8080 → upstream api; resolver 127.0.0.11)
   ├─ [api ×3] ← Dockerfile.api
   └─ [worker ×3] ← Dockerfile.worker
-[nats]         ← nats:latest        (JetStream enabled — task queue)
+[nats]         ← nats:latest + nats.conf (same config as P3)  ← named volume: nats-jetstream
 [redis]        ← redis:7-alpine     (port 6379 — SSE fan-out + store)
 ```
 Workers pull tasks via NATS JetStream (at-least-once); publish progress via Redis Pub/Sub.

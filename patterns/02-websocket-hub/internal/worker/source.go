@@ -11,7 +11,6 @@ import (
 
 	wsapi "work-distribution-patterns/patterns/02-websocket-hub/internal/api"
 	"work-distribution-patterns/shared/dispatch"
-	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
 
@@ -23,13 +22,10 @@ type sinkTask struct {
 
 // WSTaskSource implements dispatch.TaskSource over a WebSocket connection.
 // Call Connect in a goroutine to start the reconnect loop; call Receive to
-// pull tasks one at a time. Sink returns the connection-scoped sink for the
-// most recently received task — safe to call immediately after Receive in the
-// same goroutine.
+// pull tasks one at a time.
 type WSTaskSource struct {
-	apiURL  string
-	tasks   chan sinkTask
-	current *wsSink
+	apiURL string
+	tasks  chan sinkTask
 }
 
 // NewWSTaskSource creates a WSTaskSource that connects to the given WebSocket URL.
@@ -77,20 +73,14 @@ func (s *WSTaskSource) Connect(ctx context.Context) {
 
 // Receive implements dispatch.TaskSource.
 // Blocks until a task is available or ctx is cancelled.
-func (s *WSTaskSource) Receive(ctx context.Context) (models.Task, error) {
+// Returns the task along with the connection-scoped ProgressSink and ResultSink.
+func (s *WSTaskSource) Receive(ctx context.Context) (models.Task, dispatch.ProgressSink, dispatch.ResultSink, error) {
 	select {
 	case <-ctx.Done():
-		return models.Task{}, ctx.Err()
+		return models.Task{}, nil, nil, ctx.Err()
 	case st := <-s.tasks:
-		s.current = st.sink
-		return st.task, nil
+		return st.task, st.sink, st.sink, nil
 	}
-}
-
-// Sink returns the connection-scoped ProgressSink for the most recently
-// received task. Safe to call immediately after Receive in the same goroutine.
-func (s *WSTaskSource) Sink() executor.ProgressSink {
-	return s.current
 }
 
 // runConn handles one connection lifecycle: write pump, read loop, task dispatch.
@@ -181,7 +171,8 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 	}
 }
 
-// wsSink sends progress events back to the API over WebSocket.
+// wsSink sends progress and status events back to the API over WebSocket.
+// It implements both dispatch.ProgressSink (stage events) and dispatch.ResultSink (task status).
 type wsSink struct {
 	send chan []byte
 }
@@ -201,23 +192,25 @@ func (s *wsSink) Publish(event models.ProgressEvent) {
 	}
 }
 
-func (s *wsSink) PublishTaskStatus(taskID string, status models.TaskStatus) {
+func (s *wsSink) Record(taskID string, status models.TaskStatus) error {
+	var msg any
 	if status == models.TaskCompleted || status == models.TaskFailed {
-		msg := wsapi.DoneMsg{
-			Type:   wsapi.MsgTypeDone,
-			TaskID: taskID,
-		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return
-		}
-		select {
-		case s.send <- data:
-		default:
-		}
+		msg = wsapi.DoneMsg{Type: wsapi.MsgTypeDone, TaskID: taskID, Status: status}
+	} else {
+		msg = wsapi.StatusMsg{Type: wsapi.MsgTypeStatus, TaskID: taskID, Status: status}
 	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	select {
+	case s.send <- data:
+	default:
+	}
+	return nil
 }
 
 // Compile-time interface checks.
-var _ executor.ProgressSink = (*wsSink)(nil)
+var _ dispatch.ProgressSink = (*wsSink)(nil)
+var _ dispatch.ResultSink = (*wsSink)(nil)
 var _ dispatch.TaskSource = (*WSTaskSource)(nil)

@@ -11,6 +11,7 @@ import (
 
 	"work-distribution-patterns/patterns/02-websocket-hub/internal/worker"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/models"
 )
 
 func main() {
@@ -26,12 +27,16 @@ func main() {
 	go source.Connect(ctx)
 
 	for {
-		task, err := source.Receive(ctx)
+		task, progressSink, resultSink, err := source.Receive(ctx)
 		if err != nil {
 			log.Printf("worker stopped: %v", err)
 			return
 		}
-		go exec.Run(ctx, task, source.Sink())
+		go func() {
+			_ = resultSink.Record(task.ID, models.TaskRunning)
+			status := exec.Run(ctx, task, progressSink)
+			_ = resultSink.Record(task.ID, status)
+		}()
 	}
 }
 

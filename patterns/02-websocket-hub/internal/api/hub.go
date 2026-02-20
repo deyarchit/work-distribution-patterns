@@ -180,11 +180,18 @@ func (wc *WorkerConn) readPump() {
 				wc.hub.sseHub.Publish(msg.Event)
 			}
 
+		case MsgTypeStatus:
+			var msg StatusMsg
+			if err := json.Unmarshal(raw, &msg); err == nil {
+				wc.hub.sseHub.PublishTaskStatus(msg.TaskID, msg.Status)
+				_ = wc.hub.taskStore.SetStatus(msg.TaskID, msg.Status)
+			}
+
 		case MsgTypeDone:
 			var msg DoneMsg
 			if err := json.Unmarshal(raw, &msg); err == nil {
-				wc.hub.sseHub.PublishTaskStatus(msg.TaskID, models.TaskCompleted)
-				_ = wc.hub.taskStore.SetStatus(msg.TaskID, models.TaskCompleted)
+				wc.hub.sseHub.PublishTaskStatus(msg.TaskID, msg.Status)
+				_ = wc.hub.taskStore.SetStatus(msg.TaskID, msg.Status)
 				wc.hub.mu.Lock()
 				wc.busy = false
 				wc.hub.mu.Unlock()

@@ -42,10 +42,7 @@ func NewNATSTaskManager(nc *nats.Conn, js nats.JetStreamContext, store store.Tas
 	// task_status.* events carry terminal and intermediate status from workers.
 	// Both the SSE hub and the task store are updated here; workers never touch the store.
 	if _, err := nc.Subscribe("task_status.*", func(msg *nats.Msg) {
-		var payload struct {
-			TaskID string            `json:"taskID"`
-			Status models.TaskStatus `json:"status"`
-		}
+		var payload models.TaskStatusEvent
 		if err := json.Unmarshal(msg.Data, &payload); err == nil {
 			hub.PublishTaskStatus(payload.TaskID, payload.Status)
 			_ = store.SetStatus(payload.TaskID, payload.Status)
