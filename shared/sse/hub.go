@@ -7,17 +7,6 @@ import (
 	"work-distribution-patterns/shared/models"
 )
 
-type sseEvent struct {
-	Type string `json:"type"`
-	// For stage_progress events
-	TaskID    string             `json:"taskID,omitempty"`
-	StageIdx  int                `json:"stageIdx,omitempty"`
-	StageName string             `json:"stageName,omitempty"`
-	Progress  int                `json:"progress,omitempty"`
-	Status    models.StageStatus `json:"status,omitempty"`
-	// For task_status events (Status field reused as string below via separate struct)
-}
-
 type taskStatusEvent struct {
 	Type   string            `json:"type"`
 	TaskID string            `json:"taskID"`
@@ -37,7 +26,7 @@ type stageProgressEvent struct {
 type Hub struct {
 	mu         sync.Mutex
 	taskSubs   map[string]map[chan []byte]struct{} // taskID → subscribers
-	globalSubs map[chan []byte]struct{}             // taskID="" → all events
+	globalSubs map[chan []byte]struct{}            // taskID="" → all events
 }
 
 func NewHub() *Hub {

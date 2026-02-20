@@ -20,7 +20,7 @@ func NewRouter(
 ) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
-	e.Use(middleware.Logger())
+	e.Use(middleware.Logger()) //nolint:staticcheck // deprecated but still functional; sufficient for demo
 	e.Use(middleware.Recover())
 
 	// Attach template to context for HTMX fragment rendering

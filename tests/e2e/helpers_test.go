@@ -32,9 +32,9 @@ type submitResponse struct {
 
 // taskResponse mirrors models.Task for JSON decoding.
 type taskResponse struct {
-	ID     string        `json:"id"`
-	Name   string        `json:"name"`
-	Status string        `json:"status"`
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Status string          `json:"status"`
 	Stages []stageResponse `json:"stages"`
 }
 
@@ -68,7 +68,7 @@ func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent
 		url += "?taskID=" + taskID
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
 	if err != nil {
 		t.Logf("SSE connect error: %v", err)
 		close(ch)
@@ -76,13 +76,13 @@ func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Logf("SSE non-200: %d", resp.StatusCode)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		close(ch)
 		return ch
 	}
 
 	go func() {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		defer close(ch)
 
 		scanner := bufio.NewScanner(resp.Body)
@@ -118,7 +118,7 @@ func postTask(t *testing.T, name string, stageCount int) string {
 	if err != nil {
 		t.Fatalf("POST /tasks: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
@@ -136,7 +136,7 @@ func getTask(t *testing.T, id string) taskResponse {
 	if err != nil {
 		t.Fatalf("GET /tasks/%s: %v", id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var tr taskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
 		t.Fatalf("decode task: %v", err)

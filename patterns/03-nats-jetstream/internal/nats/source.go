@@ -38,14 +38,18 @@ func (s *NATSTaskSource) Connect(ctx context.Context) {
 			var task models.Task
 			if err := json.Unmarshal(msg.Data, &task); err != nil {
 				log.Printf("unmarshal task: %v", err)
-				msg.Nak()
+				if err := msg.Nak(); err != nil {
+					log.Printf("nack error: %v", err)
+				}
 				return
 			}
 			// Block until main loop picks up the task, then ACK.
 			// If the process crashes before Receive returns, NATS redelivers.
 			select {
 			case s.tasks <- task:
-				msg.Ack()
+				if err := msg.Ack(); err != nil {
+					log.Printf("ack error: %v", err)
+				}
 			case <-ctx.Done():
 			}
 		},
@@ -56,7 +60,11 @@ func (s *NATSTaskSource) Connect(ctx context.Context) {
 		log.Printf("subscribe error: %v", err)
 		return
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		if err := sub.Unsubscribe(); err != nil {
+			log.Printf("unsubscribe error: %v", err)
+		}
+	}()
 
 	<-ctx.Done()
 	log.Println("shutting down worker")
@@ -90,7 +98,9 @@ func (s *NATSSink) Publish(event models.ProgressEvent) {
 	if err != nil {
 		return
 	}
-	s.nc.Publish("progress."+event.TaskID, data)
+	if err := s.nc.Publish("progress."+event.TaskID, data); err != nil {
+		log.Printf("publish progress error: %v", err)
+	}
 }
 
 func (s *NATSSink) PublishTaskStatus(taskID string, status models.TaskStatus) {
@@ -102,7 +112,9 @@ func (s *NATSSink) PublishTaskStatus(taskID string, status models.TaskStatus) {
 	if err != nil {
 		return
 	}
-	s.nc.Publish("task_status."+taskID, data)
+	if err := s.nc.Publish("task_status."+taskID, data); err != nil {
+		log.Printf("publish task status error: %v", err)
+	}
 }
 
 // Compile-time interface checks.

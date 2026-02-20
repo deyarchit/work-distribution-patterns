@@ -16,15 +16,15 @@ import (
 )
 
 func main() {
-	addr         := envOr("ADDR", ":8080")
-	workers      := envInt("WORKERS", 5)
-	queueSize    := envInt("QUEUE_SIZE", 20)
+	addr := envOr("ADDR", ":8080")
+	workers := envInt("WORKERS", 5)
+	queueSize := envInt("QUEUE_SIZE", 20)
 	maxStageMs := envInt("MAX_STAGE_DURATION", 500)
 
-	hub       := sse.NewHub()
+	hub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	exec      := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
-	p         := pool.New(workers, queueSize)
+	exec := &executor.Executor{MaxStageDuration: time.Duration(maxStageMs) * time.Millisecond}
+	p := pool.New(workers, queueSize)
 	defer p.Stop()
 
 	manager := pool.NewPoolTaskManager(p, hub, exec, taskStore)

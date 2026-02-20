@@ -65,4 +65,3 @@ func (s *MemoryStore) SetStatus(id string, status models.TaskStatus) error {
 	}
 	return nil
 }
-

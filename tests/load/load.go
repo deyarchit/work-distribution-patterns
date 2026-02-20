@@ -30,24 +30,24 @@ type taskResponse struct {
 }
 
 func main() {
-	url      := flag.String("url", "http://localhost:8080", "API base URL")
-	rate     := flag.Float64("rate", 2.0, "Tasks per second")
+	url := flag.String("url", "http://localhost:8080", "API base URL")
+	rate := flag.Float64("rate", 2.0, "Tasks per second")
 	duration := flag.Duration("duration", 30*time.Second, "Test duration")
-	stages   := flag.Int("stages", 3, "Stages per task")
+	stages := flag.Int("stages", 3, "Stages per task")
 	flag.Parse()
 
 	log.Printf("Load test: url=%s rate=%.1f/s duration=%s stages=%d",
 		*url, *rate, *duration, *stages)
 
 	interval := time.Duration(float64(time.Second) / *rate)
-	deadline  := time.Now().Add(*duration)
+	deadline := time.Now().Add(*duration)
 
 	var (
-		submitted  int64
-		failed     int64
-		completed  int64
-		mu         sync.Mutex
-		taskIDs    []string
+		submitted int64
+		failed    int64
+		completed int64
+		mu        sync.Mutex
+		taskIDs   []string
 	)
 
 	// Submission loop
@@ -65,13 +65,13 @@ func main() {
 				atomic.AddInt64(&failed, 1)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusAccepted {
 				atomic.AddInt64(&failed, 1)
 				return
 			}
 			var sr submitResponse
-			json.NewDecoder(resp.Body).Decode(&sr)
+			_ = json.NewDecoder(resp.Body).Decode(&sr)
 			atomic.AddInt64(&submitted, 1)
 			mu.Lock()
 			taskIDs = append(taskIDs, sr.ID)
@@ -98,8 +98,8 @@ func main() {
 				continue
 			}
 			var tr taskResponse
-			json.NewDecoder(resp.Body).Decode(&tr)
-			resp.Body.Close()
+			_ = json.NewDecoder(resp.Body).Decode(&tr)
+			_ = resp.Body.Close()
 			if tr.Status == "completed" || tr.Status == "failed" {
 				if tr.Status == "completed" {
 					atomic.AddInt64(&completed, 1)
@@ -111,8 +111,8 @@ func main() {
 	}
 
 	total := atomic.LoadInt64(&submitted)
-	comp  := atomic.LoadInt64(&completed)
-	pct   := float64(0)
+	comp := atomic.LoadInt64(&completed)
+	pct := float64(0)
 	if total > 0 {
 		pct = float64(comp) / float64(total) * 100
 	}

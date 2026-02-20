@@ -88,7 +88,7 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 		defer unsub()
 
 		// Send a comment to flush headers immediately
-		fmt.Fprintf(c.Response().Writer, ": connected\n\n")
+		_, _ = fmt.Fprintf(c.Response().Writer, ": connected\n\n")
 		c.Response().Flush()
 
 		ticker := time.NewTicker(15 * time.Second)
@@ -100,11 +100,11 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 			case <-ctx.Done():
 				return nil
 			case data := <-ch:
-				fmt.Fprintf(c.Response().Writer, "data: %s\n\n", data)
+				_, _ = fmt.Fprintf(c.Response().Writer, "data: %s\n\n", data)
 				c.Response().Flush()
 			case <-ticker.C:
 				// Heartbeat to keep connection alive
-				fmt.Fprintf(c.Response().Writer, ": heartbeat\n\n")
+				_, _ = fmt.Fprintf(c.Response().Writer, ": heartbeat\n\n")
 				c.Response().Flush()
 			}
 		}

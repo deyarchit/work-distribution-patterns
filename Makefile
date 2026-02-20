@@ -1,4 +1,4 @@
-.PHONY: run-p1 run-p2 run-p3 test-e2e test-load test-all build-all tidy stop-p2 stop-p3
+.PHONY: run-p1 run-p2 run-p3 test-e2e test-load test-all build-all tidy stop-p2 stop-p3 lint fmt
 
 BASE_URL ?= http://localhost:8080
 
@@ -64,3 +64,11 @@ test-all: build-all
 ## Tidy modules
 tidy:
 	go mod tidy
+
+## Lint with golangci-lint
+lint:
+	golangci-lint run ./...
+
+## Format with golangci-lint (auto-fix formatting)
+fmt:
+	golangci-lint fmt ./...

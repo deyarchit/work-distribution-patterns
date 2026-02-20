@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	addr    := envOr("ADDR", ":8080")
+	addr := envOr("ADDR", ":8080")
 	natsURL := envOr("NATS_URL", nats.DefaultURL)
 
 	// Connect to NATS with automatic reconnect
@@ -42,7 +42,7 @@ func main() {
 		log.Fatalf("open KV: %v", err)
 	}
 
-	hub       := sse.NewHub()
+	hub := sse.NewHub()
 	taskStore := natsinternal.NewJetStreamStore(kv)
 	manager, err := natsinternal.NewNATSTaskManager(nc, js, taskStore, hub)
 	if err != nil {

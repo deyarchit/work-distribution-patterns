@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -41,7 +42,7 @@ func (m *PoolTaskManager) Submit(ctx context.Context, task models.Task) error {
 		status := m.exec.Run(context.Background(), task, m.hub)
 		_ = m.store.SetStatus(task.ID, status)
 	})
-	if err == ErrQueueFull {
+	if errors.Is(err, ErrQueueFull) {
 		_ = m.store.SetStatus(task.ID, models.TaskFailed)
 		return echo.NewHTTPError(http.StatusTooManyRequests, "task queue is full — retry later").
 			SetInternal(err)

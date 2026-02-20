@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -33,7 +34,7 @@ func (m *WSTaskManager) Submit(_ context.Context, task models.Task) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if err := m.hub.Assign(task); err == ErrNoWorkersAvailable {
+	if err := m.hub.Assign(task); errors.Is(err, ErrNoWorkersAvailable) {
 		_ = m.store.SetStatus(task.ID, models.TaskFailed)
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "no workers available — retry later").
 			SetInternal(err)

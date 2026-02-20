@@ -106,9 +106,9 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 		for {
 			select {
 			case msg, ok := <-send:
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if !ok {
-					conn.WriteMessage(websocket.CloseMessage, []byte{})
+					_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
 					return
 				}
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
@@ -116,7 +116,7 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 					return
 				}
 			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
@@ -129,9 +129,9 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 
 	sink := &wsSink{send: send}
 
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
@@ -140,10 +140,10 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 		case <-ctx.Done():
 			close(send)
 			<-done
-			conn.Close()
+			_ = conn.Close()
 			return nil
 		case <-done:
-			conn.Close()
+			_ = conn.Close()
 			return nil
 		default:
 		}
@@ -155,7 +155,7 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 			}
 			return nil
 		}
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		var generic wsapi.GenericMsg
 		if err := json.Unmarshal(raw, &generic); err != nil {
@@ -174,7 +174,7 @@ func (s *WSTaskSource) runConn(ctx context.Context, conn *websocket.Conn) error 
 			case <-ctx.Done():
 				close(send)
 				<-done
-				conn.Close()
+				_ = conn.Close()
 				return nil
 			}
 		}
