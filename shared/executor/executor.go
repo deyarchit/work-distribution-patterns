@@ -27,7 +27,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink dispatch.Prog
 		if e.MaxStageDuration > 0 {
 			tickDuration = time.Duration(rand.Int63n(int64(e.MaxStageDuration)+1)) / 10
 		}
-		sink.Publish(models.ProgressEvent{
+		_ = sink.ReportProgress(ctx, models.ProgressEvent{
 			TaskID:    task.ID,
 			StageIdx:  stage.Index,
 			StageName: stage.Name,
@@ -42,7 +42,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink dispatch.Prog
 			case <-time.After(tickDuration):
 			}
 
-			sink.Publish(models.ProgressEvent{
+			_ = sink.ReportProgress(ctx, models.ProgressEvent{
 				TaskID:    task.ID,
 				StageIdx:  stage.Index,
 				StageName: stage.Name,
@@ -51,7 +51,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink dispatch.Prog
 			})
 		}
 
-		sink.Publish(models.ProgressEvent{
+		_ = sink.ReportProgress(ctx, models.ProgressEvent{
 			TaskID:    task.ID,
 			StageIdx:  stage.Index,
 			StageName: stage.Name,

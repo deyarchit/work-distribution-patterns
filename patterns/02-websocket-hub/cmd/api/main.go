@@ -36,7 +36,7 @@ func main() {
 
 	sseHub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	workerBus := wsbus.NewWebSocketBus()
+	workerBus := wsbus.NewWebSocketProducer()
 	mgr := manager.New(taskStore, workerBus, sseHub, 0) // deadline=0; workers always connected
 	mgr.Start(context.Background())
 

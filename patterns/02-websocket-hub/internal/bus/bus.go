@@ -15,7 +15,7 @@ import (
 )
 
 // Compile-time interface check.
-var _ dispatch.WorkerBus = (*WebSocketBus)(nil)
+var _ dispatch.TaskProducer = (*WebSocketProducer)(nil)
 
 // Message type constants for the WebSocket protocol.
 const (
@@ -54,13 +54,13 @@ type workerConn struct {
 	id   string
 	conn *websocket.Conn
 	send chan []byte
-	bus  *WebSocketBus
+	bus  *WebSocketProducer
 	busy bool
 }
 
-// WebSocketBus manages connected remote workers and implements WorkerBus.
+// WebSocketProducer manages connected remote workers and implements TaskProducer.
 // Workers connect via HTTP GET /ws/register; Register is called by that handler.
-type WebSocketBus struct {
+type WebSocketProducer struct {
 	mu       sync.Mutex
 	workers  []*workerConn
 	nextIdx  int
@@ -68,19 +68,19 @@ type WebSocketBus struct {
 	progress chan models.ProgressEvent
 }
 
-// NewWebSocketBus creates a WebSocketBus with buffered result and progress channels.
-func NewWebSocketBus() *WebSocketBus {
-	return &WebSocketBus{
+// NewWebSocketProducer creates a WebSocketProducer with buffered result and progress channels.
+func NewWebSocketProducer() *WebSocketProducer {
+	return &WebSocketProducer{
 		results:  make(chan models.TaskStatusEvent, 256),
 		progress: make(chan models.ProgressEvent, 256),
 	}
 }
 
 // Start is a no-op; subscriptions are established per-connection via Register.
-func (b *WebSocketBus) Start(_ context.Context) error { return nil }
+func (b *WebSocketProducer) Start(_ context.Context) error { return nil }
 
 // Register adds a new worker connection and starts its read/write pumps.
-func (b *WebSocketBus) Register(conn *websocket.Conn) {
+func (b *WebSocketProducer) Register(conn *websocket.Conn) {
 	wc := &workerConn{
 		id:   uuid.New().String()[:8],
 		conn: conn,
@@ -97,7 +97,7 @@ func (b *WebSocketBus) Register(conn *websocket.Conn) {
 
 // Dispatch sends the task to an idle worker using round-robin.
 // Returns ErrNoWorkers if all workers are busy or none are connected.
-func (b *WebSocketBus) Dispatch(_ context.Context, task models.Task) error {
+func (b *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -131,7 +131,7 @@ func (b *WebSocketBus) Dispatch(_ context.Context, task models.Task) error {
 }
 
 // ReceiveResult blocks until a task status event is available or ctx is cancelled.
-func (b *WebSocketBus) ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error) {
+func (b *WebSocketProducer) ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error) {
 	select {
 	case <-ctx.Done():
 		return models.TaskStatusEvent{}, ctx.Err()
@@ -141,7 +141,7 @@ func (b *WebSocketBus) ReceiveResult(ctx context.Context) (models.TaskStatusEven
 }
 
 // ReceiveProgress blocks until a progress event is available or ctx is cancelled.
-func (b *WebSocketBus) ReceiveProgress(ctx context.Context) (models.ProgressEvent, error) {
+func (b *WebSocketProducer) ReceiveProgress(ctx context.Context) (models.ProgressEvent, error) {
 	select {
 	case <-ctx.Done():
 		return models.ProgressEvent{}, ctx.Err()
@@ -150,7 +150,7 @@ func (b *WebSocketBus) ReceiveProgress(ctx context.Context) (models.ProgressEven
 	}
 }
 
-func (b *WebSocketBus) remove(wc *workerConn) {
+func (b *WebSocketProducer) remove(wc *workerConn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for i, w := range b.workers {

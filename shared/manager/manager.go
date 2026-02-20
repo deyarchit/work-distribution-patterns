@@ -18,18 +18,18 @@ import (
 var _ dispatch.TaskManager = (*Manager)(nil)
 
 // Manager is the unified task lifecycle owner.
-// It persists tasks, dispatches them via WorkerBus, routes events from the bus
+// It persists tasks, dispatches them via TaskProducer, routes events from the producer
 // to the store and SSE hub, and optionally re-dispatches stalled tasks.
 type Manager struct {
 	store    store.TaskStore
-	bus      dispatch.WorkerBus
+	bus      dispatch.TaskProducer
 	hub      *sse.Hub
 	deadline time.Duration
 }
 
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
-func New(s store.TaskStore, bus dispatch.WorkerBus, hub *sse.Hub, deadline time.Duration) *Manager {
+func New(s store.TaskStore, bus dispatch.TaskProducer, hub *sse.Hub, deadline time.Duration) *Manager {
 	return &Manager{
 		store:    s,
 		bus:      bus,

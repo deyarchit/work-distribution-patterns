@@ -11,7 +11,6 @@ import (
 	"github.com/nats-io/nats.go"
 
 	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
-	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
@@ -19,16 +18,6 @@ import (
 type config struct {
 	NATSURL          string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
-}
-
-// progressSink adapts WorkerSource into dispatch.ProgressSink for the executor.
-type progressSink struct {
-	ctx    context.Context
-	source dispatch.WorkerSource
-}
-
-func (s *progressSink) Publish(event models.ProgressEvent) {
-	_ = s.source.ReportProgress(s.ctx, event)
 }
 
 func main() {
@@ -58,7 +47,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := natsinternal.NewNATSSource(nc, js)
+	source := natsinternal.NewNATSConsumer(nc, js)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	log.Printf("Pattern 3 worker listening on NATS %s", cfg.NATSURL)
@@ -75,7 +64,7 @@ func main() {
 		// preserving NATS at-least-once delivery (ACK happens in Connect after
 		// the task is delivered to Receive).
 		_ = source.ReportResult(ctx, task.ID, models.TaskRunning)
-		status := exec.Run(ctx, task, &progressSink{ctx: ctx, source: source})
+		status := exec.Run(ctx, task, source)
 		_ = source.ReportResult(ctx, task.ID, status)
 	}
 }

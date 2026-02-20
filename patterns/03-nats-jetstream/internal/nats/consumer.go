@@ -12,22 +12,22 @@ import (
 )
 
 // Compile-time interface check.
-var _ dispatch.WorkerSource = (*NATSSource)(nil)
+var _ dispatch.TaskConsumer = (*NATSConsumer)(nil)
 
-// NATSSource implements WorkerSource over NATS.
+// NATSConsumer implements TaskConsumer over NATS.
 // It receives tasks from JetStream (queue-subscribe with manual ACK for
 // at-least-once delivery) and reports results and progress via NATS Core.
 // The worker loop is synchronous — one task at a time — preserving NATS
 // at-least-once delivery semantics.
-type NATSSource struct {
+type NATSConsumer struct {
 	nc    *nats.Conn
 	js    nats.JetStreamContext
 	tasks chan models.Task
 }
 
-// NewNATSSource creates a NATSSource. Call Connect to start the subscription.
-func NewNATSSource(nc *nats.Conn, js nats.JetStreamContext) *NATSSource {
-	return &NATSSource{
+// NewNATSConsumer creates a NATSConsumer. Call Connect to start the subscription.
+func NewNATSConsumer(nc *nats.Conn, js nats.JetStreamContext) *NATSConsumer {
+	return &NATSConsumer{
 		nc:    nc,
 		js:    js,
 		tasks: make(chan models.Task, 1),
@@ -35,12 +35,12 @@ func NewNATSSource(nc *nats.Conn, js nats.JetStreamContext) *NATSSource {
 }
 
 // Connect starts the JetStream queue subscription in a background goroutine (non-blocking).
-func (s *NATSSource) Connect(ctx context.Context) error {
+func (s *NATSConsumer) Connect(ctx context.Context) error {
 	go s.subscribe(ctx)
 	return nil
 }
 
-func (s *NATSSource) subscribe(ctx context.Context) {
+func (s *NATSConsumer) subscribe(ctx context.Context) {
 	sub, err := s.js.QueueSubscribe(
 		"tasks.new",
 		ConsumerDur,
@@ -81,7 +81,7 @@ func (s *NATSSource) subscribe(ctx context.Context) {
 }
 
 // Receive blocks until a task is available or ctx is cancelled.
-func (s *NATSSource) Receive(ctx context.Context) (models.Task, error) {
+func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error) {
 	select {
 	case <-ctx.Done():
 		return models.Task{}, ctx.Err()
@@ -92,7 +92,7 @@ func (s *NATSSource) Receive(ctx context.Context) (models.Task, error) {
 
 // ReportResult publishes a task status event to "task_status.<taskID>" via NATS Core.
 // All API replicas subscribe to this subject.
-func (s *NATSSource) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
+func (s *NATSConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
 	payload := models.TaskStatusEvent{TaskID: taskID, Status: status}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -102,7 +102,7 @@ func (s *NATSSource) ReportResult(_ context.Context, taskID string, status model
 }
 
 // ReportProgress publishes a progress event to "progress.<taskID>" via NATS Core.
-func (s *NATSSource) ReportProgress(_ context.Context, event models.ProgressEvent) error {
+func (s *NATSConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err

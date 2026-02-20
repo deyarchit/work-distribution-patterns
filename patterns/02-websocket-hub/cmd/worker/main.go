@@ -10,7 +10,6 @@ import (
 	"github.com/kelseyhightower/envconfig"
 
 	"work-distribution-patterns/patterns/02-websocket-hub/internal/worker"
-	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
@@ -18,16 +17,6 @@ import (
 type config struct {
 	APIURL           string `envconfig:"api_url" default:"ws://localhost:8080/ws/register"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
-}
-
-// progressSink adapts WebSocketSource into dispatch.ProgressSink for the executor.
-type progressSink struct {
-	ctx    context.Context
-	source dispatch.WorkerSource
-}
-
-func (s *progressSink) Publish(event models.ProgressEvent) {
-	_ = s.source.ReportProgress(s.ctx, event)
 }
 
 func main() {
@@ -39,7 +28,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := worker.NewWebSocketSource(cfg.APIURL)
+	source := worker.NewWebSocketConsumer(cfg.APIURL)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	_ = source.Connect(ctx)
@@ -52,7 +41,7 @@ func main() {
 		}
 		go func() {
 			_ = source.ReportResult(ctx, task.ID, models.TaskRunning)
-			status := exec.Run(ctx, task, &progressSink{ctx: ctx, source: source})
+			status := exec.Run(ctx, task, source)
 			_ = source.ReportResult(ctx, task.ID, status)
 		}()
 	}

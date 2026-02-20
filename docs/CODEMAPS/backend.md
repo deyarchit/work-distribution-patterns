@@ -7,17 +7,17 @@
 | Package | Path | Role |
 |---------|------|------|
 | `shared/api` | `handlers.go`, `server.go` | HTTP routes (`/tasks`, `/events`, `/health`), HTMX handlers |
-| `shared/dispatch` | `manager.go`, `bus.go`, `worker_source.go`, `sink.go` | `TaskManager`, `WorkerBus`, `WorkerSource`, `ProgressSink` interfaces + sentinel errors |
+| `shared/contracts` | `manager.go`, `producer.go`, `consumer.go`, `sink.go` | `TaskManager`, `TaskProducer`, `TaskConsumer`, `ProgressSink` interfaces + sentinel errors |
 | `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, routes bus events to store/hub |
 | `shared/executor` | `executor.go` | Stage runner; emits to `dispatch.ProgressSink`; returns `TaskStatus` |
 | `shared/models` | `task.go` | `Task`, `Stage`, `ProgressEvent`, `TaskStatusEvent`, status enums |
 | `shared/sse` | `hub.go` | SSE fan-out; implements `dispatch.ProgressSink` |
 | `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
-| `p01/internal/bus` | `bus.go`, `worker.go` | `ChannelBus` (both `WorkerBus`+`WorkerSource`); `RunWorker`+`progressSink` |
-| `p02/internal/bus` | `bus.go` | `WebSocketBus` (WorkerBus): manages worker conns; readPump/writePump |
-| `p02/internal/worker` | `source.go` | `WebSocketSource` (WorkerSource): reconnect loop, `currentSend` indirection |
-| `p03/internal/nats` | `bus.go`, `source.go`, `setup.go`, `store.go` | `NATSBus`, `NATSSource`, JetStream setup, KV task store |
+| `p01/internal/channel` | `producer.go`, `consumer.go`, `worker.go` | `ChannelProducer`+`ChannelConsumer` (shared channels, same process); `RunWorker`+`progressSink` |
+| `p02/internal/bus` | `bus.go` | `WebSocketProducer` (TaskProducer): manages worker conns; readPump/writePump |
+| `p02/internal/worker` | `source.go` | `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
+| `p03/internal/nats` | `bus.go`, `source.go`, `setup.go`, `store.go` | `NATSProducer`, `NATSConsumer`, JetStream setup, KV task store |
 
 ## API Routes (`shared/api`)
 
@@ -34,11 +34,11 @@
 ## Key Type Signatures
 
 ```go
-// dispatch/manager.go
+// contracts/manager.go
 type TaskManager interface { Submit(ctx context.Context, task models.Task) error }
 
-// dispatch/bus.go — manager-side transport view
-type WorkerBus interface {
+// contracts/producer.go — manager-side transport view
+type TaskProducer interface {
     Start(ctx context.Context) error
     Dispatch(ctx context.Context, task models.Task) error
     ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error)   // blocks
@@ -47,19 +47,19 @@ type WorkerBus interface {
 var ErrDispatchFull = errors.New("dispatch queue full")   // → 429
 var ErrNoWorkers    = errors.New("no workers available")  // → 503
 
-// dispatch/worker_source.go — worker-side transport view
-type WorkerSource interface {
+// contracts/consumer.go — worker-side transport view
+type TaskConsumer interface {
     Connect(ctx context.Context) error
     Receive(ctx context.Context) (models.Task, error)   // blocks
     ReportResult(ctx context.Context, taskID string, status models.TaskStatus) error
     ReportProgress(ctx context.Context, event models.ProgressEvent) error
 }
 
-// dispatch/sink.go — UX-only, best-effort
+// contracts/sink.go — UX-only, best-effort
 type ProgressSink interface { Publish(event models.ProgressEvent) }
 
 // manager/manager.go
-func New(s store.TaskStore, bus dispatch.WorkerBus, hub *sse.Hub, deadline time.Duration) *Manager
+func New(s store.TaskStore, bus contracts.TaskProducer, hub *sse.Hub, deadline time.Duration) *Manager
 func (m *Manager) Start(ctx context.Context)   // non-blocking; launches result/progress/deadline goroutines
 func (m *Manager) Submit(ctx context.Context, task models.Task) error
 
@@ -78,9 +78,9 @@ type TaskStore interface {
 
 ## Pattern-Specific Notes
 
-**Pattern 1** — `ChannelBus` implements both `WorkerBus` and `WorkerSource` (same process, shared channels). `RunWorker` loops: `Receive` → `exec.Run` → `ReportResult`. Deadline disabled (`deadline=0`). `progressSink` adapter forwards to `source.ReportProgress`.
+**Pattern 1** — `ChannelProducer`+`ChannelConsumer` share the same in-process channels (created together by `New`). `RunWorker` loops: `Receive` → `exec.Run` → `ReportResult`. Deadline disabled (`deadline=0`). `progressSink` adapter forwards to `source.ReportProgress`.
 
-**Pattern 2** — `WebSocketBus.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. Message types unexported in each package (bus-side and worker-side) with matching JSON fields. `WebSocketSource` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Deadline disabled.
+**Pattern 2** — `WebSocketProducer.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. Message types unexported in each package (producer-side and consumer-side) with matching JSON fields. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Deadline disabled.
 
-**Pattern 3** — `NATSBus.Start` NATS Core-subscribes to `progress.*`/`task_status.*`. `NATSSource.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s.
+**Pattern 3** — `NATSProducer.Start` NATS Core-subscribes to `progress.*`/`task_status.*`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s.
 

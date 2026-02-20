@@ -15,7 +15,7 @@ import (
 )
 
 // Compile-time interface check.
-var _ dispatch.WorkerSource = (*WebSocketSource)(nil)
+var _ dispatch.TaskConsumer = (*WebSocketConsumer)(nil)
 
 // Message type constants — must match the API bus protocol.
 const (
@@ -52,31 +52,31 @@ type doneMsg struct {
 	Status models.TaskStatus `json:"status"`
 }
 
-// WebSocketSource implements dispatch.WorkerSource over a WebSocket connection
+// WebSocketConsumer implements dispatch.TaskConsumer over a WebSocket connection
 // to the API. Connect starts the reconnect loop (non-blocking); Receive blocks
 // until a task arrives.
-type WebSocketSource struct {
+type WebSocketConsumer struct {
 	apiURL      string
 	tasks       chan models.Task
 	mu          sync.Mutex
 	currentSend chan []byte // guarded by mu; nil when disconnected
 }
 
-// NewWebSocketSource creates a WebSocketSource that connects to the given URL.
-func NewWebSocketSource(apiURL string) *WebSocketSource {
-	return &WebSocketSource{
+// NewWebSocketConsumer creates a WebSocketConsumer that connects to the given URL.
+func NewWebSocketConsumer(apiURL string) *WebSocketConsumer {
+	return &WebSocketConsumer{
 		apiURL: apiURL,
 		tasks:  make(chan models.Task, 1),
 	}
 }
 
 // Connect starts the reconnect loop in a background goroutine (non-blocking).
-func (s *WebSocketSource) Connect(ctx context.Context) error {
+func (s *WebSocketConsumer) Connect(ctx context.Context) error {
 	go s.reconnectLoop(ctx)
 	return nil
 }
 
-func (s *WebSocketSource) reconnectLoop(ctx context.Context) {
+func (s *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 	for attempt := 0; ; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -119,7 +119,7 @@ func (s *WebSocketSource) reconnectLoop(ctx context.Context) {
 }
 
 // Receive blocks until a task is available or ctx is cancelled.
-func (s *WebSocketSource) Receive(ctx context.Context) (models.Task, error) {
+func (s *WebSocketConsumer) Receive(ctx context.Context) (models.Task, error) {
 	select {
 	case <-ctx.Done():
 		return models.Task{}, ctx.Err()
@@ -130,7 +130,7 @@ func (s *WebSocketSource) Receive(ctx context.Context) (models.Task, error) {
 
 // ReportResult sends a task status event to the API over WebSocket.
 // Terminal statuses use DoneMsg; non-terminal statuses use StatusMsg.
-func (s *WebSocketSource) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
+func (s *WebSocketConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
 	var msg any
 	if status == models.TaskCompleted || status == models.TaskFailed {
 		msg = doneMsg{Type: msgTypeDone, TaskID: taskID, Status: status}
@@ -156,7 +156,7 @@ func (s *WebSocketSource) ReportResult(_ context.Context, taskID string, status 
 
 // ReportProgress sends a stage progress event to the API over WebSocket.
 // Events are best-effort and may be dropped if the send buffer is full.
-func (s *WebSocketSource) ReportProgress(_ context.Context, event models.ProgressEvent) error {
+func (s *WebSocketConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
 	data, err := json.Marshal(progressMsg{Type: msgTypeProgress, Event: event})
 	if err != nil {
 		return err
@@ -175,7 +175,7 @@ func (s *WebSocketSource) ReportProgress(_ context.Context, event models.Progres
 }
 
 // runConn manages one connection lifecycle: write pump + read loop.
-func (s *WebSocketSource) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error {
+func (s *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error {
 	done := make(chan struct{})
 
 	// Write pump — only goroutine that writes to conn.

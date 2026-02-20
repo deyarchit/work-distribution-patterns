@@ -52,7 +52,7 @@ func main() {
 
 	hub := sse.NewHub()
 	taskStore := natsinternal.NewJetStreamStore(kv)
-	natsBus := natsinternal.NewNATSBus(nc, js)
+	natsBus := natsinternal.NewNATSProducer(nc, js)
 	mgr := manager.New(taskStore, natsBus, hub, 30*time.Second)
 	mgr.Start(context.Background())
 
