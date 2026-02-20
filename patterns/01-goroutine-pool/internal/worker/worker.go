@@ -1,4 +1,4 @@
-package channel
+package worker
 
 import (
 	"context"

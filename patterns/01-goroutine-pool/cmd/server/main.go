@@ -8,7 +8,8 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 
-	"work-distribution-patterns/patterns/01-goroutine-pool/internal/channel"
+	"work-distribution-patterns/patterns/01-goroutine-pool/internal/goroutine"
+	"work-distribution-patterns/patterns/01-goroutine-pool/internal/worker"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/manager"
@@ -36,12 +37,12 @@ func main() {
 	taskStore := store.NewMemoryStore()
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	producer, consumer := channel.New(cfg.QueueSize)
+	producer, consumer := goroutine.New(cfg.QueueSize)
 	mgr := manager.New(taskStore, producer, hub, 0) // deadline=0 disables re-dispatch
 	mgr.Start(ctx)
 
 	for i := 0; i < cfg.Workers; i++ {
-		go channel.RunWorker(ctx, consumer, exec)
+		go worker.RunWorker(ctx, consumer, exec)
 	}
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
