@@ -10,7 +10,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/labstack/echo/v4"
 
-	wsbus "work-distribution-patterns/patterns/02-websocket-hub/internal/bus"
+	wsinternal "work-distribution-patterns/patterns/02-websocket-hub/internal/websocket"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/sse"
@@ -36,7 +36,7 @@ func main() {
 
 	sseHub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
-	workerBus := wsbus.NewWebSocketProducer()
+	workerBus := wsinternal.NewWebSocketProducer()
 	mgr := manager.New(taskStore, workerBus, sseHub, 0) // deadline=0; workers always connected
 	mgr.Start(context.Background())
 

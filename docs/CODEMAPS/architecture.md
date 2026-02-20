@@ -1,4 +1,4 @@
-<!-- Commit: 6780e92624254b744e0a20a07f22ed5341bd4371 | Files scanned: 58 | Token estimate: ~720 -->
+<!-- Commit: 037cf2a0a6aad9ab680755e81d64b2bce033fac2 | Files scanned: 26 | Token estimate: ~720 -->
 
 # Architecture
 
@@ -9,14 +9,15 @@ Three patterns demonstrating different work distribution topologies, all sharing
 ## Shared Interfaces
 
 ```
-dispatch.TaskManager   Submit(ctx, task) error                       — API → Manager (unchanged)
-dispatch.WorkerBus     Start/Dispatch/ReceiveResult/ReceiveProgress  — manager-side transport view
-dispatch.WorkerSource  Connect/Receive/ReportResult/ReportProgress   — worker-side transport view
-dispatch.ProgressSink  Publish(event)                                — stage progress (UX, best-effort)
-store.TaskStore        Create/Get/List/SetStatus                     — task persistence
+contracts.TaskManager   Submit(ctx, task) error                       — API → Manager (unchanged)
+contracts.TaskProducer  Start/Dispatch/ReceiveResult/ReceiveProgress  — manager-side transport view
+contracts.TaskConsumer  Connect/Receive/ReportResult/ReportProgress   — worker-side transport view
+contracts.ProgressSink  ReportProgress(ctx, event) error              — stage progress (UX, best-effort)
+store.TaskStore         Create/Get/List/SetStatus                     — task persistence
 ```
 
-`WorkerBus` and `WorkerSource` are the variation points; all other logic lives in `shared/manager.Manager`.
+`TaskProducer` and `TaskConsumer` are the variation points; all other logic lives in `shared/manager.Manager`.
+`TaskConsumer` automatically satisfies `ProgressSink` (same `ReportProgress` signature).
 Sentinel errors from `Dispatch`: `ErrDispatchFull` → HTTP 429, `ErrNoWorkers` → HTTP 503.
 
 ## Three-Layer Structure
@@ -24,38 +25,38 @@ Sentinel errors from `Dispatch`: `ErrDispatchFull` → HTTP 429, `ErrNoWorkers` 
 ```
 API layer    shared/api          HTTP transport, unchanged
 Manager      shared/manager      task lifecycle, deadline loop, event routing
-Worker       per-pattern         bus.go (WorkerBus) + source.go (WorkerSource)
+Transport    per-pattern         producer.go (TaskProducer) + consumer.go (TaskConsumer)
 ```
 
 ## Pattern 1: Goroutine Pool (single process)
 
 ```
-Browser ──POST /tasks──► shared/api ──► Manager ──► ChannelBus.Dispatch()
-                                                          │ buffered chan
-                         sse.Hub ◄── Manager.runResultLoop ◄── ChannelBus.results
-                         sse.Hub ◄── Manager.runProgressLoop ◄─ ChannelBus.progress
+Browser ──POST /tasks──► shared/api ──► Manager ──► ChannelProducer.Dispatch()
+                                                          │ buffered chan (directional)
+                         sse.Hub ◄── Manager.runResultLoop ◄── ChannelProducer.results
+                         sse.Hub ◄── Manager.runProgressLoop ◄─ ChannelProducer.progress
                             │
-                         RunWorker goroutines ◄── ChannelBus.Receive()
+                         RunWorker goroutines ◄── ChannelConsumer.Receive()
 Browser ◄── GET /events ───┘
 ```
 
-- `ChannelBus` implements both `WorkerBus` and `WorkerSource` (same process, shared channels)
+- `ChannelProducer`+`ChannelConsumer` created together by `goroutine.New`; share directional channels
 - Store: `MemoryStore`; Backpressure: HTTP 429; Deadline loop: disabled (`deadline=0`)
 - Env: `WORKERS`, `QUEUE_SIZE`, `MAX_STAGE_DURATION`
 
 ## Pattern 2: WebSocket Hub (API + remote workers)
 
 ```
-Browser ──POST /tasks──► shared/api ──► Manager ──► WebSocketBus.Dispatch()
+Browser ──POST /tasks──► shared/api ──► Manager ──► WebSocketProducer.Dispatch()
                                                           │ WebSocket
-                         sse.Hub ◄── Manager.runResultLoop ◄── WebSocketBus.results
+                         sse.Hub ◄── Manager.runResultLoop ◄── WebSocketProducer.results
                             │                          (readPump pushes to chan)
-                         Worker process ◄── WebSocketSource.Receive()
+                         Worker process ◄── WebSocketConsumer.Receive()
 Browser ◄── GET /events ───┘
 ```
 
 - Store: `MemoryStore`; Backpressure: HTTP 503; Deadline loop: disabled
-- Worker registration: `GET /ws/register` → `WebSocketBus.Register(conn)`
+- Worker registration: `GET /ws/register` → `WebSocketProducer.Register(conn)`
 
 ## Pattern 3: NATS JetStream (horizontally scaled)
 

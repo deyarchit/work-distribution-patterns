@@ -9,7 +9,7 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 
-	"work-distribution-patterns/patterns/02-websocket-hub/internal/worker"
+	wsinternal "work-distribution-patterns/patterns/02-websocket-hub/internal/websocket"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/models"
 )
@@ -28,7 +28,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := worker.NewWebSocketConsumer(cfg.APIURL)
+	source := wsinternal.NewWebSocketConsumer(cfg.APIURL)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	_ = source.Connect(ctx)

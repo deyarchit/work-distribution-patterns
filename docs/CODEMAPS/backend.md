@@ -1,4 +1,4 @@
-<!-- Commit: 6780e92624254b744e0a20a07f22ed5341bd4371 | Files scanned: 58 | Token estimate: ~680 -->
+<!-- Commit: 037cf2a0a6aad9ab680755e81d64b2bce033fac2 | Files scanned: 26 | Token estimate: ~680 -->
 
 # Backend Codemap
 
@@ -14,10 +14,10 @@
 | `shared/sse` | `hub.go` | SSE fan-out; implements `dispatch.ProgressSink` |
 | `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
-| `p01/internal/channel` | `producer.go`, `consumer.go`, `worker.go` | `ChannelProducer`+`ChannelConsumer` (shared channels, same process); `RunWorker`+`progressSink` |
-| `p02/internal/bus` | `bus.go` | `WebSocketProducer` (TaskProducer): manages worker conns; readPump/writePump |
-| `p02/internal/worker` | `source.go` | `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
-| `p03/internal/nats` | `bus.go`, `source.go`, `setup.go`, `store.go` | `NATSProducer`, `NATSConsumer`, JetStream setup, KV task store |
+| `p01/internal/goroutine` | `producer.go`, `consumer.go` | `ChannelProducer`+`ChannelConsumer` (shared directional channels, same process); constructed together by `New` |
+| `p01/internal/worker` | `worker.go` | `RunWorker`: `Receive` → `exec.Run` → `ReportResult` loop |
+| `p02/internal/websocket` (pkg `wsinternal`) | `producer.go`, `consumer.go` | `WebSocketProducer` (TaskProducer): manages worker conns, readPump/writePump; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
+| `p03/internal/nats` (pkg `natsinternal`) | `producer.go`, `consumer.go`, `setup.go`, `store.go` | `NATSProducer`, `NATSConsumer`, JetStream setup, KV task store |
 
 ## API Routes (`shared/api`)
 
@@ -55,8 +55,8 @@ type TaskConsumer interface {
     ReportProgress(ctx context.Context, event models.ProgressEvent) error
 }
 
-// contracts/sink.go — UX-only, best-effort
-type ProgressSink interface { Publish(event models.ProgressEvent) }
+// contracts/sink.go — UX-only, best-effort; TaskConsumer satisfies this automatically
+type ProgressSink interface { ReportProgress(ctx context.Context, event models.ProgressEvent) error }
 
 // manager/manager.go
 func New(s store.TaskStore, bus contracts.TaskProducer, hub *sse.Hub, deadline time.Duration) *Manager
@@ -78,9 +78,9 @@ type TaskStore interface {
 
 ## Pattern-Specific Notes
 
-**Pattern 1** — `ChannelProducer`+`ChannelConsumer` share the same in-process channels (created together by `New`). `RunWorker` loops: `Receive` → `exec.Run` → `ReportResult`. Deadline disabled (`deadline=0`). `progressSink` adapter forwards to `source.ReportProgress`.
+**Pattern 1** — `ChannelProducer`+`ChannelConsumer` share the same in-process channels (created together by `New`). Directional channel types enforce ownership at compile time. `RunWorker` loops: `Receive` → `exec.Run` → `ReportResult`; `source` passed directly as `ProgressSink`. Deadline disabled (`deadline=0`).
 
-**Pattern 2** — `WebSocketProducer.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. Message types unexported in each package (producer-side and consumer-side) with matching JSON fields. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Deadline disabled.
+**Pattern 2** — `WebSocketProducer.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. All message types are unexported and co-located in `internal/websocket` (package `wsinternal`). `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Deadline disabled.
 
 **Pattern 3** — `NATSProducer.Start` NATS Core-subscribes to `progress.*`/`task_status.*`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s.
 

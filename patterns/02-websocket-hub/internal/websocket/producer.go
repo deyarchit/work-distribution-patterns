@@ -1,4 +1,4 @@
-package bus
+package wsinternal
 
 import (
 	"context"
@@ -54,7 +54,7 @@ type workerConn struct {
 	id   string
 	conn *websocket.Conn
 	send chan []byte
-	bus  *WebSocketProducer
+	hub  *WebSocketProducer
 	busy bool
 }
 
@@ -77,19 +77,19 @@ func NewWebSocketProducer() *WebSocketProducer {
 }
 
 // Start is a no-op; subscriptions are established per-connection via Register.
-func (b *WebSocketProducer) Start(_ context.Context) error { return nil }
+func (p *WebSocketProducer) Start(_ context.Context) error { return nil }
 
 // Register adds a new worker connection and starts its read/write pumps.
-func (b *WebSocketProducer) Register(conn *websocket.Conn) {
+func (p *WebSocketProducer) Register(conn *websocket.Conn) {
 	wc := &workerConn{
 		id:   uuid.New().String()[:8],
 		conn: conn,
 		send: make(chan []byte, 64),
-		bus:  b,
+		hub:  p,
 	}
-	b.mu.Lock()
-	b.workers = append(b.workers, wc)
-	b.mu.Unlock()
+	p.mu.Lock()
+	p.workers = append(p.workers, wc)
+	p.mu.Unlock()
 	log.Printf("worker %s connected", wc.id)
 	go wc.writePump()
 	go wc.readPump()
@@ -97,21 +97,21 @@ func (b *WebSocketProducer) Register(conn *websocket.Conn) {
 
 // Dispatch sends the task to an idle worker using round-robin.
 // Returns ErrNoWorkers if all workers are busy or none are connected.
-func (b *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (p *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	n := len(b.workers)
+	n := len(p.workers)
 	if n == 0 {
 		return dispatch.ErrNoWorkers
 	}
 
 	for i := 0; i < n; i++ {
-		idx := (b.nextIdx + i) % n
-		wc := b.workers[idx]
+		idx := (p.nextIdx + i) % n
+		wc := p.workers[idx]
 		if !wc.busy {
 			wc.busy = true
-			b.nextIdx = (idx + 1) % n
+			p.nextIdx = (idx + 1) % n
 
 			data, err := json.Marshal(taskMsg{Type: msgTypeTask, Task: task})
 			if err != nil {
@@ -131,31 +131,31 @@ func (b *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error 
 }
 
 // ReceiveResult blocks until a task status event is available or ctx is cancelled.
-func (b *WebSocketProducer) ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error) {
+func (p *WebSocketProducer) ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error) {
 	select {
 	case <-ctx.Done():
 		return models.TaskStatusEvent{}, ctx.Err()
-	case ev := <-b.results:
+	case ev := <-p.results:
 		return ev, nil
 	}
 }
 
 // ReceiveProgress blocks until a progress event is available or ctx is cancelled.
-func (b *WebSocketProducer) ReceiveProgress(ctx context.Context) (models.ProgressEvent, error) {
+func (p *WebSocketProducer) ReceiveProgress(ctx context.Context) (models.ProgressEvent, error) {
 	select {
 	case <-ctx.Done():
 		return models.ProgressEvent{}, ctx.Err()
-	case ev := <-b.progress:
+	case ev := <-p.progress:
 		return ev, nil
 	}
 }
 
-func (b *WebSocketProducer) remove(wc *workerConn) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for i, w := range b.workers {
+func (p *WebSocketProducer) remove(wc *workerConn) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, w := range p.workers {
 		if w == wc {
-			b.workers = append(b.workers[:i], b.workers[i+1:]...)
+			p.workers = append(p.workers[:i], p.workers[i+1:]...)
 			break
 		}
 	}
@@ -189,12 +189,12 @@ func (wc *workerConn) writePump() {
 }
 
 // readPump processes messages from the worker.
-// Progress events are forwarded to the bus's progress channel.
-// Status and done events are forwarded to the bus's results channel.
+// Progress events are forwarded to the hub's progress channel.
+// Status and done events are forwarded to the hub's results channel.
 // DoneMsg also marks the worker as no longer busy.
 func (wc *workerConn) readPump() {
 	defer func() {
-		wc.bus.remove(wc)
+		wc.hub.remove(wc)
 		close(wc.send)
 		_ = wc.conn.Close()
 		log.Printf("worker %s disconnected", wc.id)
@@ -227,7 +227,7 @@ func (wc *workerConn) readPump() {
 			var msg progressMsg
 			if err := json.Unmarshal(raw, &msg); err == nil {
 				select {
-				case wc.bus.progress <- msg.Event:
+				case wc.hub.progress <- msg.Event:
 				default:
 				}
 			}
@@ -235,16 +235,16 @@ func (wc *workerConn) readPump() {
 		case msgTypeStatus:
 			var msg statusMsg
 			if err := json.Unmarshal(raw, &msg); err == nil {
-				wc.bus.results <- models.TaskStatusEvent{TaskID: msg.TaskID, Status: msg.Status}
+				wc.hub.results <- models.TaskStatusEvent{TaskID: msg.TaskID, Status: msg.Status}
 			}
 
 		case msgTypeDone:
 			var msg doneMsg
 			if err := json.Unmarshal(raw, &msg); err == nil {
-				wc.bus.results <- models.TaskStatusEvent{TaskID: msg.TaskID, Status: msg.Status}
-				wc.bus.mu.Lock()
+				wc.hub.results <- models.TaskStatusEvent{TaskID: msg.TaskID, Status: msg.Status}
+				wc.hub.mu.Lock()
 				wc.busy = false
-				wc.bus.mu.Unlock()
+				wc.hub.mu.Unlock()
 			}
 
 		case msgTypeReady:

@@ -1,4 +1,4 @@
-package worker
+package wsinternal
 
 import (
 	"context"
@@ -17,39 +17,9 @@ import (
 // Compile-time interface check.
 var _ dispatch.TaskConsumer = (*WebSocketConsumer)(nil)
 
-// Message type constants — must match the API bus protocol.
-const (
-	msgTypeReady    = "ready"
-	msgTypeTask     = "task"
-	msgTypeProgress = "progress"
-	msgTypeStatus   = "status"
-	msgTypeDone     = "done"
-)
-
-// Unexported message types for JSON marshaling/unmarshaling.
-type genericMsg struct {
-	Type string `json:"type"`
-}
+// readyMsg is sent immediately after connecting to signal the worker is idle.
 type readyMsg struct {
 	Type string `json:"type"`
-}
-type taskMsg struct {
-	Type string      `json:"type"`
-	Task models.Task `json:"task"`
-}
-type progressMsg struct {
-	Type  string               `json:"type"`
-	Event models.ProgressEvent `json:"event"`
-}
-type statusMsg struct {
-	Type   string            `json:"type"`
-	TaskID string            `json:"taskId"`
-	Status models.TaskStatus `json:"status"`
-}
-type doneMsg struct {
-	Type   string            `json:"type"`
-	TaskID string            `json:"taskId"`
-	Status models.TaskStatus `json:"status"`
 }
 
 // WebSocketConsumer implements dispatch.TaskConsumer over a WebSocket connection
@@ -71,12 +41,12 @@ func NewWebSocketConsumer(apiURL string) *WebSocketConsumer {
 }
 
 // Connect starts the reconnect loop in a background goroutine (non-blocking).
-func (s *WebSocketConsumer) Connect(ctx context.Context) error {
-	go s.reconnectLoop(ctx)
+func (c *WebSocketConsumer) Connect(ctx context.Context) error {
+	go c.reconnectLoop(ctx)
 	return nil
 }
 
-func (s *WebSocketConsumer) reconnectLoop(ctx context.Context) {
+func (c *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 	for attempt := 0; ; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -94,8 +64,8 @@ func (s *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 			}
 		}
 
-		log.Printf("connecting to %s", s.apiURL)
-		conn, _, err := websocket.DefaultDialer.Dial(s.apiURL, nil)
+		log.Printf("connecting to %s", c.apiURL)
+		conn, _, err := websocket.DefaultDialer.Dial(c.apiURL, nil)
 		if err != nil {
 			log.Printf("dial error: %v", err)
 			continue
@@ -104,33 +74,33 @@ func (s *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 		attempt = 0
 
 		send := make(chan []byte, 128)
-		s.mu.Lock()
-		s.currentSend = send
-		s.mu.Unlock()
+		c.mu.Lock()
+		c.currentSend = send
+		c.mu.Unlock()
 
-		if err := s.runConn(ctx, conn, send); err != nil {
+		if err := c.runConn(ctx, conn, send); err != nil {
 			log.Printf("connection error: %v", err)
 		}
 
-		s.mu.Lock()
-		s.currentSend = nil
-		s.mu.Unlock()
+		c.mu.Lock()
+		c.currentSend = nil
+		c.mu.Unlock()
 	}
 }
 
 // Receive blocks until a task is available or ctx is cancelled.
-func (s *WebSocketConsumer) Receive(ctx context.Context) (models.Task, error) {
+func (c *WebSocketConsumer) Receive(ctx context.Context) (models.Task, error) {
 	select {
 	case <-ctx.Done():
 		return models.Task{}, ctx.Err()
-	case task := <-s.tasks:
+	case task := <-c.tasks:
 		return task, nil
 	}
 }
 
 // ReportResult sends a task status event to the API over WebSocket.
 // Terminal statuses use DoneMsg; non-terminal statuses use StatusMsg.
-func (s *WebSocketConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
+func (c *WebSocketConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
 	var msg any
 	if status == models.TaskCompleted || status == models.TaskFailed {
 		msg = doneMsg{Type: msgTypeDone, TaskID: taskID, Status: status}
@@ -141,9 +111,9 @@ func (s *WebSocketConsumer) ReportResult(_ context.Context, taskID string, statu
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	send := s.currentSend
-	s.mu.Unlock()
+	c.mu.Lock()
+	send := c.currentSend
+	c.mu.Unlock()
 	if send == nil {
 		return nil
 	}
@@ -156,14 +126,14 @@ func (s *WebSocketConsumer) ReportResult(_ context.Context, taskID string, statu
 
 // ReportProgress sends a stage progress event to the API over WebSocket.
 // Events are best-effort and may be dropped if the send buffer is full.
-func (s *WebSocketConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
+func (c *WebSocketConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
 	data, err := json.Marshal(progressMsg{Type: msgTypeProgress, Event: event})
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	send := s.currentSend
-	s.mu.Unlock()
+	c.mu.Lock()
+	send := c.currentSend
+	c.mu.Unlock()
 	if send == nil {
 		return nil
 	}
@@ -175,7 +145,7 @@ func (s *WebSocketConsumer) ReportProgress(_ context.Context, event models.Progr
 }
 
 // runConn manages one connection lifecycle: write pump + read loop.
-func (s *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error {
+func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error {
 	done := make(chan struct{})
 
 	// Write pump — only goroutine that writes to conn.
@@ -248,7 +218,7 @@ func (s *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 			}
 			log.Printf("received task %s (%d stages)", msg.Task.ID, len(msg.Task.Stages))
 			select {
-			case s.tasks <- msg.Task:
+			case c.tasks <- msg.Task:
 			case <-ctx.Done():
 				close(send)
 				<-done
