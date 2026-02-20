@@ -72,3 +72,17 @@ func (s *JetStreamStore) SetStatus(id string, status models.TaskStatus) error {
 	_, err = s.kv.Put(id, data)
 	return err
 }
+
+func (s *JetStreamStore) SetDispatchedAt(id string, t time.Time) error {
+	task, ok := s.Get(id)
+	if !ok {
+		return fmt.Errorf("task %s not found", id)
+	}
+	task.DispatchedAt = &t
+	data, err := json.Marshal(task)
+	if err != nil {
+		return err
+	}
+	_, err = s.kv.Put(id, data)
+	return err
+}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -22,23 +21,20 @@ var _ dispatch.TaskManager = (*Manager)(nil)
 // It persists tasks, dispatches them via WorkerBus, routes events from the bus
 // to the store and SSE hub, and optionally re-dispatches stalled tasks.
 type Manager struct {
-	store         store.TaskStore
-	bus           dispatch.WorkerBus
-	hub           *sse.Hub
-	deadline      time.Duration
-	mu            sync.Mutex
-	dispatchTimes map[string]time.Time // taskID → last dispatch time; in-memory only
+	store    store.TaskStore
+	bus      dispatch.WorkerBus
+	hub      *sse.Hub
+	deadline time.Duration
 }
 
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
 func New(s store.TaskStore, bus dispatch.WorkerBus, hub *sse.Hub, deadline time.Duration) *Manager {
 	return &Manager{
-		store:         s,
-		bus:           bus,
-		hub:           hub,
-		deadline:      deadline,
-		dispatchTimes: make(map[string]time.Time),
+		store:    s,
+		bus:      bus,
+		hub:      hub,
+		deadline: deadline,
 	}
 }
 
@@ -64,9 +60,7 @@ func (m *Manager) Submit(ctx context.Context, task models.Task) error {
 		}
 	}
 
-	m.mu.Lock()
-	m.dispatchTimes[task.ID] = time.Now()
-	m.mu.Unlock()
+	_ = m.store.SetDispatchedAt(task.ID, time.Now())
 	return nil
 }
 
@@ -89,11 +83,6 @@ func (m *Manager) runResultLoop(ctx context.Context) {
 		}
 		_ = m.store.SetStatus(event.TaskID, event.Status)
 		m.hub.PublishTaskStatus(event.TaskID, event.Status)
-		if event.Status == models.TaskCompleted || event.Status == models.TaskFailed {
-			m.mu.Lock()
-			delete(m.dispatchTimes, event.TaskID)
-			m.mu.Unlock()
-		}
 	}
 }
 
@@ -121,19 +110,15 @@ func (m *Manager) runDeadlineLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			now := time.Now()
-			tasks := m.store.List()
-			m.mu.Lock()
-			for _, task := range tasks {
+			for _, task := range m.store.List() {
 				if task.Status == models.TaskCompleted || task.Status == models.TaskFailed {
 					continue
 				}
-				t, ok := m.dispatchTimes[task.ID]
-				if ok && now.Sub(t) > m.deadline {
+				if task.DispatchedAt != nil && now.Sub(*task.DispatchedAt) > m.deadline {
 					_ = m.bus.Dispatch(ctx, task)
-					m.dispatchTimes[task.ID] = now
+					_ = m.store.SetDispatchedAt(task.ID, now)
 				}
 			}
-			m.mu.Unlock()
 		}
 	}
 }

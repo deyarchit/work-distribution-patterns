@@ -1,6 +1,10 @@
 package store
 
-import "work-distribution-patterns/shared/models"
+import (
+	"time"
+
+	"work-distribution-patterns/shared/models"
+)
 
 // TaskStore is the persistence interface for tasks.
 type TaskStore interface {
@@ -8,4 +12,5 @@ type TaskStore interface {
 	Get(id string) (models.Task, bool)
 	List() []models.Task
 	SetStatus(id string, status models.TaskStatus) error
+	SetDispatchedAt(id string, t time.Time) error
 }

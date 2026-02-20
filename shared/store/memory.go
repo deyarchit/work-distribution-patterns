@@ -65,3 +65,14 @@ func (s *MemoryStore) SetStatus(id string, status models.TaskStatus) error {
 	}
 	return nil
 }
+
+func (s *MemoryStore) SetDispatchedAt(id string, t time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task, ok := s.tasks[id]
+	if !ok {
+		return fmt.Errorf("task %s not found", id)
+	}
+	task.DispatchedAt = &t
+	return nil
+}

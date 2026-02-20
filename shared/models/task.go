@@ -63,12 +63,13 @@ const (
 )
 
 type Task struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Status      TaskStatus `json:"status"`
-	SubmittedAt time.Time  `json:"submittedAt"`
-	CompletedAt *time.Time `json:"completedAt,omitempty"`
-	Stages      []Stage    `json:"stages"`
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Status       TaskStatus `json:"status"`
+	SubmittedAt  time.Time  `json:"submittedAt"`
+	DispatchedAt *time.Time `json:"dispatchedAt,omitempty"`
+	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+	Stages       []Stage    `json:"stages"`
 }
 
 type Stage struct {
