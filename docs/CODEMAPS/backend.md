@@ -18,10 +18,6 @@
 | `p02/internal/bus` | `bus.go` | `WebSocketBus` (WorkerBus): manages worker conns; readPump/writePump |
 | `p02/internal/worker` | `source.go` | `WebSocketSource` (WorkerSource): reconnect loop, `currentSend` indirection |
 | `p03/internal/nats` | `bus.go`, `source.go`, `setup.go`, `store.go` | `NATSBus`, `NATSSource`, JetStream setup, KV task store |
-| `p04/internal/bus` | `bus.go` | `NATSRedisBus` (WorkerBus): NATS JetStream dispatch + Redis PSubscribe |
-| `p04/internal/worker` | `source.go` | `NATSRedisSource` (WorkerSource): NATS JetStream pull + Redis Publish |
-| `p04/internal/nats` | `setup.go` | JetStream stream setup (unchanged) |
-| `p04/internal/redis` | `store.go` | `RedisTaskStore` (unchanged) |
 
 ## API Routes (`shared/api`)
 
@@ -88,4 +84,3 @@ type TaskStore interface {
 
 **Pattern 3** — `NATSBus.Start` NATS Core-subscribes to `progress.*`/`task_status.*`. `NATSSource.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s.
 
-**Pattern 4** — `NATSRedisBus.Start` uses Redis PSubscribe on `progress:*`/`task_status:*`. `NATSRedisSource.Connect` NATS JetStream queue-subscribes. Results/progress via `rdb.Publish`. Store is `RedisTaskStore`. Deadline 30 s.

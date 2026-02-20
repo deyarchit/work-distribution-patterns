@@ -4,7 +4,7 @@
 
 ## Overview
 
-Four patterns demonstrating different work distribution topologies, all sharing the same HTTP API surface and HTMX frontend.
+Three patterns demonstrating different work distribution topologies, all sharing the same HTTP API surface and HTMX frontend.
 
 ## Shared Interfaces
 
@@ -74,21 +74,3 @@ Browser ◄── GET /events ───┘ (any replica — no sticky sessions n
 - Store: `JetStreamStore` (NATS KV — shared); Deadline: 30 s re-dispatch
 - Env: `NATS_URL`
 
-## Pattern 4: NATS + Redis (hybrid — NATS queue, Redis SSE fan-out)
-
-```
-Browser ──POST /tasks──► nginx ──► API replica ──► Manager ──► NATSRedisBus.Dispatch()
-                           │                                           │ JetStream
-                        Redis Pub/Sub ◄── NATSRedisSource.ReportResult/Progress
-                      (PSubscribe progress:*                  (via redis.Publish)
-                       task_status:*)
-                              │
-                    ALL API replicas: NATSRedisBus.Start() PSubscribes
-                    Manager routes to hub + store
-
-Browser ◄── GET /events ───┘ (any replica — no sticky sessions needed)
-```
-
-- Store: `RedisTaskStore`; Workers: NATS JetStream queue-subscribe; Deadline: 30 s re-dispatch
-- nginx uses `resolver 127.0.0.11 valid=5s` + `set $upstream` for true round-robin
-- Env: `NATS_URL`, `REDIS_ADDR`
