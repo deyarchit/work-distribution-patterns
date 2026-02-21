@@ -1,4 +1,4 @@
-<!-- Commit: 5054cca620340baf0cbf3f62ec91c38a00d213b1 | Files scanned: 26 | Token estimate: ~720 -->
+<!-- Commit: e927fc3061e6071046447d9933c5d2161663f55b | Files scanned: 27 | Token estimate: ~730 -->
 
 # Architecture
 
@@ -59,20 +59,21 @@ Browser ◄── GET /events ───┘
 - Store: `MemoryStore`; Backpressure: HTTP 503; Deadline loop: disabled
 - Worker registration: `GET /ws/register` → `WebSocketProducer.Register(conn)`
 
-## Pattern 3: NATS JetStream (horizontally scaled)
+## Pattern 3: Queue-and-Store (horizontally scaled)
 
 ```
 Browser ──POST /tasks──► nginx ──► API replica ──► Manager ──► NATSProducer.Dispatch()
-                                       │                              │ JetStream
+                                       │                              │ JetStream (tasks.new)
                           NATS Core ◄──┘                     Worker NATSConsumer.Receive()
                        (task.events.*)                        exec.Run(ctx, task, source)
                               │                               NATSConsumer.Emit → task.events.<id>
                     ALL API replicas: NATSProducer.Start() subscribes to task.events.*
-                    Manager.runEventLoop routes to hub + store
+                    Manager.runEventLoop routes to hub + PostgreSQL store
 
 Browser ◄── GET /events ───┘ (any replica — no sticky sessions needed)
 ```
 
-- Store: `JetStreamStore` (NATS KV — shared); Deadline: 30 s re-dispatch
-- Env: `NATS_URL`
+- Store: `pgstore.Store` (PostgreSQL — shared across replicas); Deadline: 30 s re-dispatch
+- NATS used for queuing only (JetStream dispatch + NATS Core event routing)
+- Env: `NATS_URL`, `DATABASE_URL`
 

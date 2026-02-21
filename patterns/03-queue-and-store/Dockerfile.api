@@ -3,7 +3,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./patterns/03-nats-jetstream/cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./patterns/03-queue-and-store/cmd/api
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates

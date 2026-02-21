@@ -10,7 +10,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 
-	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
+	natsinternal "work-distribution-patterns/patterns/03-queue-and-store/internal/nats"
 	"work-distribution-patterns/shared/executor"
 )
 

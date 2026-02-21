@@ -1,5 +1,25 @@
 # Codemap Rationale Log
 
+## e927fc3 — 2026-02-20
+Commits: `5054cca..e927fc3` (+ uncommitted rename + PostgreSQL work)
+
+### Decisions
+- **Pattern 3 renamed `03-nats-jetstream` → `03-queue-and-store`**: The name reflects the
+  two-component separation — NATS JetStream for queuing, PostgreSQL for state — rather than
+  pinning to a single technology.
+
+- **NATS KV replaced with PostgreSQL (`pgx/v5`)**: NATS KV is a convenience layer on top of
+  JetStream; it adds a 24 h TTL (tasks expire) and lacks query, backup, and migration
+  tooling. PostgreSQL is the natural fit for persistent, durable task state. NATS now has a
+  single responsibility: work distribution (JetStream) and event fan-out (NATS Core).
+
+- **Ephemeral Postgres container (no named volume)**: Omitting the volume from the Postgres
+  service means `docker compose down` wipes the database. Each `docker compose up` starts
+  clean — by design for repeatable E2E test runs.
+
+- **Schema created inline on startup (`New(ctx, pool)`)**: A single `CREATE TABLE IF NOT
+  EXISTS` keeps the setup self-contained without requiring a migration tool or init script.
+
 ## df20ceb — 2026-02-19
 Commits: `9d2e9eb..df20ceb` (+ uncommitted Pattern 4 work)
 

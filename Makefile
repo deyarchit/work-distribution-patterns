@@ -15,10 +15,10 @@ stop-p2:
 
 ## Run Pattern 3 with Docker Compose (3 APIs + 3 workers + NATS + nginx)
 run-p3:
-	docker compose -f patterns/03-nats-jetstream/docker-compose.yml up --build
+	docker compose -f patterns/03-queue-and-store/docker-compose.yml up --build
 
 stop-p3:
-	docker compose -f patterns/03-nats-jetstream/docker-compose.yml down
+	docker compose -f patterns/03-queue-and-store/docker-compose.yml down
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
@@ -33,8 +33,8 @@ build-all:
 	go build -o bin/p1-server  ./patterns/01-goroutine-pool/cmd/server
 	go build -o bin/p2-api     ./patterns/02-websocket-hub/cmd/api
 	go build -o bin/p2-worker  ./patterns/02-websocket-hub/cmd/worker
-	go build -o bin/p3-api     ./patterns/03-nats-jetstream/cmd/api
-	go build -o bin/p3-worker  ./patterns/03-nats-jetstream/cmd/worker
+	go build -o bin/p3-api     ./patterns/03-queue-and-store/cmd/api
+	go build -o bin/p3-worker  ./patterns/03-queue-and-store/cmd/worker
 
 ## Build all binaries and validate all three patterns end-to-end
 test-all: build-all
@@ -53,11 +53,11 @@ test-all: build-all
 	  docker compose -f patterns/02-websocket-hub/docker-compose.yml down; \
 	  exit $$RC; \
 	}
-	@echo "==> [3/3] Pattern 3: nats-jetstream"
+	@echo "==> [3/3] Pattern 3: queue-and-store"
 	@{ \
-	  docker compose -f patterns/03-nats-jetstream/docker-compose.yml up --build -d --wait && \
+	  docker compose -f patterns/03-queue-and-store/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/03-nats-jetstream/docker-compose.yml down; \
+	  docker compose -f patterns/03-queue-and-store/docker-compose.yml down; \
 	  exit $$RC; \
 	}
 

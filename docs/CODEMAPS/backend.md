@@ -1,4 +1,4 @@
-<!-- Commit: 5054cca620340baf0cbf3f62ec91c38a00d213b1 | Files scanned: 26 | Token estimate: ~680 -->
+<!-- Commit: e927fc3061e6071046447d9933c5d2161663f55b | Files scanned: 27 | Token estimate: ~700 -->
 
 # Backend Codemap
 
@@ -17,7 +17,8 @@
 | `p01/internal/goroutine` | `producer.go`, `consumer.go` | `ChannelProducer`+`ChannelConsumer` (single shared `events chan TaskEvent`); constructed together by `New` |
 | `p01/internal/worker` | `worker.go` | `RunWorker`: `Receive` → `exec.Run(ctx, task, source)` loop |
 | `p02/internal/websocket` (pkg `wsinternal`) | `producer.go`, `consumer.go` | `WebSocketProducer` (TaskProducer): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
-| `p03/internal/nats` (pkg `natsinternal`) | `producer.go`, `consumer.go`, `setup.go`, `store.go` | `NATSProducer`, `NATSConsumer`, JetStream setup, KV task store |
+| `p03/internal/nats` (pkg `natsinternal`) | `producer.go`, `consumer.go`, `setup.go` | `NATSProducer`, `NATSConsumer`, JetStream stream setup |
+| `p03/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
 
 ## API Routes (`shared/api`)
 
@@ -82,6 +83,7 @@ type TaskStore interface {
     Get(id string) (models.Task, bool)
     List() []models.Task
     SetStatus(id string, status models.TaskStatus) error
+    SetDispatchedAt(id string, t time.Time) error
 }
 ```
 
@@ -91,5 +93,5 @@ type TaskStore interface {
 
 **Pattern 2** — `WebSocketProducer.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. All message types are unexported and co-located in `internal/websocket` (package `wsinternal`). `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Deadline disabled.
 
-**Pattern 3** — `NATSProducer.Start` NATS Core-subscribes to a single `task.events.*` subject. `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s.
+**Pattern 3** — `NATSProducer.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.
 

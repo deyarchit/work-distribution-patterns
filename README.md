@@ -117,7 +117,7 @@ shared/
 patterns/
 ├── 01-goroutine-pool/    Bounded goroutine pool (in-process)
 ├── 02-websocket-hub/     WebSocket dispatch to external workers
-└── 03-nats-jetstream/    NATS JetStream + KV for full distribution
+└── 03-queue-and-store/    NATS JetStream (queue) + PostgreSQL (store) for full distribution
 ```
 
 ## Environment Variables
@@ -150,14 +150,14 @@ Worker (`patterns/02-websocket-hub/cmd/worker`):
 
 ### Pattern 3 — NATS JetStream
 
-API (`patterns/03-nats-jetstream/cmd/api`):
+API (`patterns/03-queue-and-store/cmd/api`):
 
 | Variable | Default | Description |
 |---|---|---|
 | `ADDR` | `:8080` | Listen address |
 | `NATS_URL` | `nats://127.0.0.1:4222` | NATS server URL |
 
-Worker (`patterns/03-nats-jetstream/cmd/worker`):
+Worker (`patterns/03-queue-and-store/cmd/worker`):
 
 | Variable | Default | Description |
 |---|---|---|

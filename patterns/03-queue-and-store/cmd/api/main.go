@@ -6,10 +6,12 @@ import (
 	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 
-	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
+	natsinternal "work-distribution-patterns/patterns/03-queue-and-store/internal/nats"
+	pgstore "work-distribution-patterns/patterns/03-queue-and-store/internal/postgres"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/sse"
@@ -17,14 +19,28 @@ import (
 )
 
 type config struct {
-	Addr    string `envconfig:"addr" default:":8080"`
-	NATSURL string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	Addr        string `envconfig:"addr" default:":8080"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
 }
 
 func main() {
 	var cfg config
 	if err := envconfig.Process("", &cfg); err != nil {
 		log.Fatalf("config: %v", err)
+	}
+
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("postgres connect: %v", err)
+	}
+	defer pool.Close()
+
+	taskStore, err := pgstore.New(ctx, pool)
+	if err != nil {
+		log.Fatalf("postgres store: %v", err)
 	}
 
 	nc, err := nats.Connect(cfg.NATSURL,
@@ -45,16 +61,10 @@ func main() {
 		log.Printf("setup warning: %v", err)
 	}
 
-	kv, err := js.KeyValue(natsinternal.KVBucket)
-	if err != nil {
-		log.Fatalf("open KV: %v", err)
-	}
-
 	hub := sse.NewHub()
-	taskStore := natsinternal.NewJetStreamStore(kv)
 	natsBus := natsinternal.NewNATSProducer(nc, js)
 	mgr := manager.New(taskStore, natsBus, hub, 30*time.Second)
-	mgr.Start(context.Background())
+	mgr.Start(ctx)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
@@ -62,6 +72,6 @@ func main() {
 	}
 
 	e := api.NewRouter(taskStore, hub, tpl, mgr)
-	log.Printf("Pattern 3 (NATS JetStream) API listening on %s", cfg.Addr)
+	log.Printf("Pattern 3 (Queue-and-Store) API listening on %s", cfg.Addr)
 	log.Fatal(e.Start(cfg.Addr))
 }
