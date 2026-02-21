@@ -1,4 +1,4 @@
-last-sha: 037cf2a0a6aad9ab680755e81d64b2bce033fac2
+last-sha: 5054cca620340baf0cbf3f62ec91c38a00d213b1
 updated: 2026-02-20
-commit-range: 6780e92..037cf2a
+commit-range: 037cf2a..5054cca
 codemaps-touched: docs/CODEMAPS/architecture.md docs/CODEMAPS/backend.md
