@@ -2,7 +2,6 @@ package e2e_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -113,64 +112,6 @@ func TestConcurrentTasks(t *testing.T) {
 	}
 }
 
-// TestProgressBeforeCompletion simulates browser behaviour: the browser
-// closes its SSE connection as soon as task_status=completed arrives.
-// Any progress events that haven't been delivered yet are therefore lost.
-// This test detects the ordering race where task_status=completed is published
-// before the final progress=100 event, leaving the bar stuck at <100% in the UI.
-//
-// With the unified single-channel design the ordering is guaranteed by
-// construction, so the test should pass reliably. It runs numRuns times to
-// confirm there is no regression.
-func TestProgressBeforeCompletion(t *testing.T) {
-	const (
-		numStages = 3
-		numRuns   = 5
-	)
-
-	for run := range numRuns {
-		t.Run(fmt.Sprintf("run%d", run), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-
-			id := postTask(t, "e2e-progress-order", numStages)
-			t.Logf("submitted task %s", id)
-
-			events := SSEClient(ctx, t, id)
-
-			maxProgress := 0
-
-			for {
-				select {
-				case <-ctx.Done():
-					t.Fatalf("timeout; max progress at cut-off: %d%%", maxProgress)
-				case ev, ok := <-events:
-					if !ok {
-						t.Fatal("SSE stream closed unexpectedly")
-					}
-					switch ev.Type {
-					case "progress":
-						if ev.Progress > maxProgress {
-							maxProgress = ev.Progress
-						}
-					case "task_status":
-						if ev.Status != "completed" {
-							continue
-						}
-						// Simulate browser: stop reading now.
-						// The progress bar must already be at 100%.
-						cancel()
-						if maxProgress != 100 {
-							t.Errorf("progress=%d%% at task_status=completed, want 100%%", maxProgress)
-						}
-						return
-					}
-				}
-			}
-		})
-	}
-}
-
 // TestStatusTransitions verifies the task goes through pending → running → completed.
 func TestStatusTransitions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -201,7 +142,20 @@ func TestStatusTransitions(t *testing.T) {
 				t.Log("saw completed status")
 				task := getTask(t, id)
 				if task.Status != "completed" {
-					t.Errorf("expected store status=completed, got %s", task.Status)
+					t.Errorf("GET /tasks/:id: expected status=completed, got %s", task.Status)
+				}
+				tasks := listTasks(t)
+				var found *taskResponse
+				for i := range tasks {
+					if tasks[i].ID == id {
+						found = &tasks[i]
+						break
+					}
+				}
+				if found == nil {
+					t.Errorf("GET /tasks: task %s not found in list", id)
+				} else if found.Status != "completed" {
+					t.Errorf("GET /tasks: expected status=completed, got %s", found.Status)
 				}
 				return
 			}

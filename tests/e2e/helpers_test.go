@@ -126,6 +126,24 @@ func postTask(t *testing.T, name string, stageCount int) string {
 	return sr.ID
 }
 
+// listTasks fetches all tasks from GET /tasks.
+func listTasks(t *testing.T) []taskResponse {
+	t.Helper()
+	resp, err := http.Get(baseURL() + "/tasks")
+	if err != nil {
+		t.Fatalf("GET /tasks: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /tasks: expected 200, got %d", resp.StatusCode)
+	}
+	var tasks []taskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+		t.Fatalf("decode task list: %v", err)
+	}
+	return tasks
+}
+
 // getTask fetches a task by ID.
 func getTask(t *testing.T, id string) taskResponse {
 	t.Helper()
