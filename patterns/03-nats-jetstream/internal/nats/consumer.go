@@ -16,7 +16,7 @@ var _ dispatch.TaskConsumer = (*NATSConsumer)(nil)
 
 // NATSConsumer implements TaskConsumer over NATS.
 // It receives tasks from JetStream (queue-subscribe with manual ACK for
-// at-least-once delivery) and reports results and progress via NATS Core.
+// at-least-once delivery) and emits all task events via NATS Core.
 // The worker loop is synchronous — one task at a time — preserving NATS
 // at-least-once delivery semantics.
 type NATSConsumer struct {
@@ -90,22 +90,12 @@ func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error) {
 	}
 }
 
-// ReportResult publishes a task status event to "task_status.<taskID>" via NATS Core.
-// All API replicas subscribe to this subject.
-func (s *NATSConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
-	payload := models.TaskStatusEvent{TaskID: taskID, Status: status}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return s.nc.Publish("task_status."+taskID, data)
-}
-
-// ReportProgress publishes a progress event to "progress.<taskID>" via NATS Core.
-func (s *NATSConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
+// Emit publishes a TaskEvent to "task.events.<taskID>" via NATS Core.
+// All API replicas subscribe to this subject, ensuring every SSE hub receives the event.
+func (s *NATSConsumer) Emit(_ context.Context, event models.TaskEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	return s.nc.Publish("progress."+event.TaskID, data)
+	return s.nc.Publish("task.events."+event.TaskID, data)
 }

@@ -2,12 +2,13 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 )
 
-// TestSingleTask verifies a 3-stage task runs all stages to completion.
+// TestSingleTask verifies a 3-stage task emits progress events and reaches completed.
 func TestSingleTask(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -17,26 +18,26 @@ func TestSingleTask(t *testing.T) {
 
 	events := SSEClient(ctx, t, id)
 
-	stageCompleted := make(map[int]bool)
+	progressSeen := false
 	taskDone := false
 
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timeout: stages completed=%v, taskDone=%v", stageCompleted, taskDone)
+			t.Fatalf("timeout: progressSeen=%v, taskDone=%v", progressSeen, taskDone)
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed unexpectedly")
 			}
-			if ev.Type == "stage_progress" && ev.Status == "completed" && ev.Progress == 100 {
-				stageCompleted[ev.StageIdx] = true
-				t.Logf("stage %d completed", ev.StageIdx)
+			if ev.Type == "progress" {
+				progressSeen = true
+				t.Logf("progress: %d%% (stage: %s)", ev.Progress, ev.StageName)
 			}
 			if ev.Type == "task_status" && ev.Status == "completed" {
 				taskDone = true
 				t.Log("task completed")
 			}
-			if taskDone && len(stageCompleted) == 3 {
+			if taskDone && progressSeen {
 				return
 			}
 		}
@@ -109,6 +110,64 @@ func TestConcurrentTasks(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestProgressBeforeCompletion simulates browser behaviour: the browser
+// closes its SSE connection as soon as task_status=completed arrives.
+// Any progress events that haven't been delivered yet are therefore lost.
+// This test detects the ordering race where task_status=completed is published
+// before the final progress=100 event, leaving the bar stuck at <100% in the UI.
+//
+// With the unified single-channel design the ordering is guaranteed by
+// construction, so the test should pass reliably. It runs numRuns times to
+// confirm there is no regression.
+func TestProgressBeforeCompletion(t *testing.T) {
+	const (
+		numStages = 3
+		numRuns   = 5
+	)
+
+	for run := range numRuns {
+		t.Run(fmt.Sprintf("run%d", run), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			id := postTask(t, "e2e-progress-order", numStages)
+			t.Logf("submitted task %s", id)
+
+			events := SSEClient(ctx, t, id)
+
+			maxProgress := 0
+
+			for {
+				select {
+				case <-ctx.Done():
+					t.Fatalf("timeout; max progress at cut-off: %d%%", maxProgress)
+				case ev, ok := <-events:
+					if !ok {
+						t.Fatal("SSE stream closed unexpectedly")
+					}
+					switch ev.Type {
+					case "progress":
+						if ev.Progress > maxProgress {
+							maxProgress = ev.Progress
+						}
+					case "task_status":
+						if ev.Status != "completed" {
+							continue
+						}
+						// Simulate browser: stop reading now.
+						// The progress bar must already be at 100%.
+						cancel()
+						if maxProgress != 100 {
+							t.Errorf("progress=%d%% at task_status=completed, want 100%%", maxProgress)
+						}
+						return
+					}
+				}
+			}
+		})
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"time"
 
-	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
 )
 
@@ -16,49 +16,51 @@ type Executor struct {
 	MaxStageDuration time.Duration
 }
 
-// Run executes all stages of the task sequentially, emitting 10 progress ticks
-// per stage. Each stage duration is randomized in [0, MaxStageDuration].
-// Returns the terminal TaskStatus (TaskCompleted or TaskFailed).
-// The caller is responsible for publishing TaskRunning before Run and the
-// returned status after Run via ResultSink.
-func (e *Executor) Run(ctx context.Context, task models.Task, sink dispatch.ProgressSink) models.TaskStatus {
-	for _, stage := range task.Stages {
+// Run executes all stages of the task sequentially, emitting a task_status=running
+// event at start, 10 overall-progress ticks per stage, and a terminal
+// task_status=completed or task_status=failed event on exit.
+// The sink receives all events in order through a single channel, eliminating
+// the ordering race between progress and status events.
+func (e *Executor) Run(ctx context.Context, task models.Task, sink contracts.EventSink) {
+	total := len(task.Stages) * 10 // total ticks across all stages
+
+	_ = sink.Emit(ctx, models.TaskEvent{
+		Type:   models.EventTaskStatus,
+		TaskID: task.ID,
+		Status: string(models.TaskRunning),
+	})
+
+	for stageIdx, stage := range task.Stages {
 		var tickDuration time.Duration
 		if e.MaxStageDuration > 0 {
 			tickDuration = time.Duration(rand.Int63n(int64(e.MaxStageDuration)+1)) / 10
 		}
-		_ = sink.ReportProgress(ctx, models.ProgressEvent{
-			TaskID:    task.ID,
-			StageIdx:  stage.Index,
-			StageName: stage.Name,
-			Progress:  0,
-			Status:    models.StageRunning,
-		})
 
 		for tick := 1; tick <= 10; tick++ {
 			select {
 			case <-ctx.Done():
-				return models.TaskFailed
+				_ = sink.Emit(ctx, models.TaskEvent{
+					Type:   models.EventTaskStatus,
+					TaskID: task.ID,
+					Status: string(models.TaskFailed),
+				})
+				return
 			case <-time.After(tickDuration):
 			}
 
-			_ = sink.ReportProgress(ctx, models.ProgressEvent{
+			overallProgress := (stageIdx*10 + tick) * 100 / total
+			_ = sink.Emit(ctx, models.TaskEvent{
+				Type:      models.EventProgress,
 				TaskID:    task.ID,
-				StageIdx:  stage.Index,
 				StageName: stage.Name,
-				Progress:  tick * 10,
-				Status:    models.StageRunning,
+				Progress:  overallProgress,
 			})
 		}
-
-		_ = sink.ReportProgress(ctx, models.ProgressEvent{
-			TaskID:    task.ID,
-			StageIdx:  stage.Index,
-			StageName: stage.Name,
-			Progress:  100,
-			Status:    models.StageCompleted,
-		})
 	}
 
-	return models.TaskCompleted
+	_ = sink.Emit(ctx, models.TaskEvent{
+		Type:   models.EventTaskStatus,
+		TaskID: task.ID,
+		Status: string(models.TaskCompleted),
+	})
 }

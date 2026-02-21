@@ -7,21 +7,6 @@ import (
 	"work-distribution-patterns/shared/models"
 )
 
-type taskStatusEvent struct {
-	Type   string            `json:"type"`
-	TaskID string            `json:"taskID"`
-	Status models.TaskStatus `json:"status"`
-}
-
-type stageProgressEvent struct {
-	Type      string             `json:"type"`
-	TaskID    string             `json:"taskID"`
-	StageIdx  int                `json:"stageIdx"`
-	StageName string             `json:"stageName"`
-	Progress  int                `json:"progress"`
-	Status    models.StageStatus `json:"status"`
-}
-
 // Hub manages SSE subscribers and broadcasts events to task-scoped or global subscribers.
 type Hub struct {
 	mu         sync.Mutex
@@ -68,35 +53,13 @@ func (h *Hub) Subscribe(taskID string) (chan []byte, func()) {
 	return ch, unsub
 }
 
-// Publish broadcasts a stage progress event to task-scoped and global subscribers.
-func (h *Hub) Publish(event models.ProgressEvent) {
-	ev := stageProgressEvent{
-		Type:      "stage_progress",
-		TaskID:    event.TaskID,
-		StageIdx:  event.StageIdx,
-		StageName: event.StageName,
-		Progress:  event.Progress,
-		Status:    event.Status,
-	}
-	data, err := json.Marshal(ev)
+// Publish broadcasts a TaskEvent to task-scoped and global subscribers.
+func (h *Hub) Publish(event models.TaskEvent) {
+	data, err := json.Marshal(event)
 	if err != nil {
 		return
 	}
 	h.broadcast(event.TaskID, data)
-}
-
-// PublishTaskStatus broadcasts a task status change event to task-scoped and global subscribers.
-func (h *Hub) PublishTaskStatus(taskID string, status models.TaskStatus) {
-	ev := taskStatusEvent{
-		Type:   "task_status",
-		TaskID: taskID,
-		Status: status,
-	}
-	data, err := json.Marshal(ev)
-	if err != nil {
-		return
-	}
-	h.broadcast(taskID, data)
 }
 
 func (h *Hub) broadcast(taskID string, data []byte) {

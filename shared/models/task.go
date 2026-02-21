@@ -28,12 +28,7 @@ func NewTask(name string, stageCount int) Task {
 		if i < len(stageNames) {
 			stageName = stageNames[i]
 		}
-		stages[i] = Stage{
-			Index:    i,
-			Name:     stageName,
-			Status:   StagePending,
-			Progress: 0,
-		}
+		stages[i] = Stage{Index: i, Name: stageName}
 	}
 
 	return Task{
@@ -46,7 +41,6 @@ func NewTask(name string, stageCount int) Task {
 }
 
 type TaskStatus string
-type StageStatus string
 
 const (
 	TaskPending   TaskStatus = "pending"
@@ -55,12 +49,25 @@ const (
 	TaskFailed    TaskStatus = "failed"
 )
 
+// TaskEvent is the single ordered event type flowing from worker to manager.
+// Type is either EventProgress or EventTaskStatus.
+//
+//   - EventProgress events carry StageName and Progress; they are ephemeral
+//     (forwarded to SSE clients only, never persisted to the store).
+//   - EventTaskStatus events carry Status; terminal statuses (completed/failed)
+//     are persisted; "running" is forwarded only.
 const (
-	StagePending   StageStatus = "pending"
-	StageRunning   StageStatus = "running"
-	StageCompleted StageStatus = "completed"
-	StageFailed    StageStatus = "failed"
+	EventProgress   = "progress"
+	EventTaskStatus = "task_status"
 )
+
+type TaskEvent struct {
+	Type      string `json:"type"`
+	TaskID    string `json:"taskID"`
+	StageName string `json:"stageName,omitempty"` // EventProgress only
+	Progress  int    `json:"progress,omitempty"`  // 0–100, EventProgress only
+	Status    string `json:"status,omitempty"`    // EventTaskStatus only
+}
 
 type Task struct {
 	ID           string     `json:"id"`
@@ -72,24 +79,9 @@ type Task struct {
 	Stages       []Stage    `json:"stages"`
 }
 
+// Stage records the name and index of a task stage.
+// Progress is tracked ephemerally via TaskEvent; it is not persisted.
 type Stage struct {
-	Index    int         `json:"index"`
-	Name     string      `json:"name"`
-	Status   StageStatus `json:"status"`
-	Progress int         `json:"progress"`
-}
-
-type ProgressEvent struct {
-	TaskID    string      `json:"taskID"`
-	StageIdx  int         `json:"stageIdx"`
-	StageName string      `json:"stageName"`
-	Progress  int         `json:"progress"`
-	Status    StageStatus `json:"status"`
-}
-
-// TaskStatusEvent is the payload for task_status transport channels
-// (NATS Core "task_status.<id>", Redis Pub/Sub "task_status:<id>").
-type TaskStatusEvent struct {
-	TaskID string     `json:"taskID"`
-	Status TaskStatus `json:"status"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
 }

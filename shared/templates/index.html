@@ -153,70 +153,28 @@
     .badge.completed { background: #14532d; color: #4ade80; }
     .badge.failed    { background: #450a0a; color: #f87171; }
 
-    /* Overall progress */
-    .overall-progress {
-      height: 4px;
+    /* Progress bar */
+    .task-progress {
+      height: 6px;
       background: #0f172a;
-      border-radius: 2px;
-      margin-bottom: 1rem;
+      border-radius: 3px;
+      margin-bottom: 0.625rem;
       overflow: hidden;
     }
-    .overall-progress-bar {
+    .task-progress-bar {
       height: 100%;
       background: #6366f1;
-      border-radius: 2px;
+      border-radius: 3px;
       transition: width 0.3s ease;
     }
-    .task-card.completed .overall-progress-bar { background: #16a34a; }
-    .task-card.failed    .overall-progress-bar { background: #dc2626; }
+    .task-card.completed .task-progress-bar { background: #16a34a; }
+    .task-card.failed    .task-progress-bar { background: #dc2626; }
 
-    /* Stages */
-    .stages {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    .stage-row {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .stage-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: #334155;
-      flex-shrink: 0;
-    }
-    .stage-dot.running   { background: #6366f1; box-shadow: 0 0 6px #6366f1; }
-    .stage-dot.completed { background: #16a34a; }
-    .stage-dot.failed    { background: #dc2626; }
-    .stage-name {
-      font-size: 0.8rem;
-      color: #94a3b8;
-      width: 110px;
-      flex-shrink: 0;
-    }
-    .stage-progress-track {
-      flex: 1;
-      height: 4px;
-      background: #0f172a;
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .stage-progress-fill {
-      height: 100%;
-      background: #6366f1;
-      border-radius: 2px;
-      transition: width 0.2s ease;
-    }
-    .stage-progress-fill.completed { background: #16a34a; }
-    .stage-progress-fill.failed    { background: #dc2626; }
-    .stage-pct {
-      font-size: 0.75rem;
+    /* Current stage label */
+    .stage-label {
+      font-size: 0.78rem;
       color: #64748b;
-      width: 35px;
-      text-align: right;
-      flex-shrink: 0;
+      min-height: 1.1em;
     }
   </style>
 </head>
@@ -266,8 +224,8 @@
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data);
-          if (ev.type === 'stage_progress') handleStageProgress(ev);
-          else if (ev.type === 'task_status')  handleTaskStatus(ev);
+          if (ev.type === 'progress')     handleProgress(ev);
+          else if (ev.type === 'task_status') handleTaskStatus(ev);
         } catch (err) { console.error('SSE parse error:', err); }
       };
       es.onerror = () => updateSSEStatus(taskConnections.size > 0);
@@ -300,19 +258,13 @@
     // If a card isn't in the DOM yet (SSE arrived before HTMX response),
     // we simply skip — htmx:afterSwap will sync state once HTMX inserts it.
 
-    function handleStageProgress(ev) {
+    function handleProgress(ev) {
       const card = document.getElementById('task-' + ev.taskID);
       if (!card) return;
-      const row = card.querySelector('[data-stage="' + ev.stageIdx + '"]');
-      if (row) {
-        row.querySelector('.stage-dot').className = 'stage-dot ' + ev.status;
-        const fill = row.querySelector('.stage-progress-fill');
-        fill.className = 'stage-progress-fill' +
-          (ev.status === 'completed' ? ' completed' : ev.status === 'failed' ? ' failed' : '');
-        fill.style.width = ev.progress + '%';
-        row.querySelector('.stage-pct').textContent = ev.progress + '%';
-      }
-      updateOverallProgress(card);
+      const bar = card.querySelector('.task-progress-bar');
+      if (bar) bar.style.width = ev.progress + '%';
+      const label = card.querySelector('.stage-label');
+      if (label && ev.stageName) label.textContent = ev.stageName;
     }
 
     function handleTaskStatus(ev) {
@@ -321,7 +273,12 @@
       card.className = 'task-card ' + ev.status;
       const badge = card.querySelector('.badge');
       if (badge) { badge.className = 'badge ' + ev.status; badge.textContent = ev.status; }
-      updateOverallProgress(card);
+      if (ev.status === 'completed') {
+        const bar = card.querySelector('.task-progress-bar');
+        if (bar) bar.style.width = '100%';
+        const label = card.querySelector('.stage-label');
+        if (label) label.textContent = '';
+      }
       if (ev.status === 'completed' || ev.status === 'failed') {
         closeTaskSSE(ev.taskID);
       }
@@ -347,31 +304,10 @@
           card.className = 'task-card ' + task.status;
           const badge = card.querySelector('.badge');
           if (badge) { badge.className = 'badge ' + task.status; badge.textContent = task.status; }
-          (task.stages || []).forEach(s => {
-            const row = card.querySelector('[data-stage="' + s.index + '"]');
-            if (!row) return;
-            row.querySelector('.stage-dot').className = 'stage-dot ' + s.status;
-            const fill = row.querySelector('.stage-progress-fill');
-            fill.className = 'stage-progress-fill' +
-              (s.status === 'completed' ? ' completed' : s.status === 'failed' ? ' failed' : '');
-            fill.style.width = s.progress + '%';
-            row.querySelector('.stage-pct').textContent = s.progress + '%';
-          });
-          updateOverallProgress(card);
           if (task.status === 'completed' || task.status === 'failed') {
             closeTaskSSE(taskID);
           }
         });
-    }
-
-    // ── Utilities ────────────────────────────────────────────────────────────
-    function updateOverallProgress(card) {
-      const fills = card.querySelectorAll('.stage-progress-fill');
-      if (!fills.length) return;
-      let total = 0;
-      fills.forEach(f => { total += parseInt(f.style.width || '0', 10); });
-      const bar = card.querySelector('.overall-progress-bar');
-      if (bar) bar.style.width = Math.round(total / fills.length) + '%';
     }
     // No connectSSE() call — connections are opened per-task via htmx:afterSwap
   </script>
@@ -388,20 +324,9 @@
     </div>
     <span class="badge {{.Status}}">{{.Status}}</span>
   </div>
-  <div class="overall-progress">
-    <div class="overall-progress-bar" style="width: 0%"></div>
+  <div class="task-progress">
+    <div class="task-progress-bar" style="width: 0%"></div>
   </div>
-  <div class="stages">
-    {{range .Stages}}
-    <div class="stage-row" data-stage="{{.Index}}">
-      <div class="stage-dot {{.Status}}"></div>
-      <div class="stage-name">{{.Name}}</div>
-      <div class="stage-progress-track">
-        <div class="stage-progress-fill {{if eq .Status "completed"}}completed{{end}}" style="width: {{.Progress}}%"></div>
-      </div>
-      <div class="stage-pct">{{.Progress}}%</div>
-    </div>
-    {{end}}
-  </div>
+  <div class="stage-label"></div>
 </div>
 {{end}}

@@ -12,7 +12,6 @@ import (
 
 	natsinternal "work-distribution-patterns/patterns/03-nats-jetstream/internal/nats"
 	"work-distribution-patterns/shared/executor"
-	"work-distribution-patterns/shared/models"
 )
 
 type config struct {
@@ -63,8 +62,6 @@ func main() {
 		// Synchronous: exec.Run completes before we receive the next task,
 		// preserving NATS at-least-once delivery (ACK happens in Connect after
 		// the task is delivered to Receive).
-		_ = source.ReportResult(ctx, task.ID, models.TaskRunning)
-		status := exec.Run(ctx, task, source)
-		_ = source.ReportResult(ctx, task.ID, status)
+		exec.Run(ctx, task, source)
 	}
 }

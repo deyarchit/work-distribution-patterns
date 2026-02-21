@@ -64,33 +64,31 @@ func (m *Manager) Submit(ctx context.Context, task models.Task) error {
 	return nil
 }
 
-// Start initialises the bus then launches the result, progress, and deadline goroutines.
+// Start initialises the bus then launches the event and deadline goroutines.
 // It is non-blocking; call it once before serving requests.
 func (m *Manager) Start(ctx context.Context) {
 	if err := m.bus.Start(ctx); err != nil {
 		return
 	}
-	go m.runResultLoop(ctx)
-	go m.runProgressLoop(ctx)
+	go m.runEventLoop(ctx)
 	go m.runDeadlineLoop(ctx)
 }
 
-func (m *Manager) runResultLoop(ctx context.Context) {
+// runEventLoop consumes all TaskEvents from the bus in a single goroutine,
+// guaranteeing that progress and status events are processed in the order
+// they were emitted. Terminal statuses are persisted; all events are forwarded
+// to the SSE hub.
+func (m *Manager) runEventLoop(ctx context.Context) {
 	for {
-		event, err := m.bus.ReceiveResult(ctx)
+		event, err := m.bus.ReceiveEvent(ctx)
 		if err != nil {
 			return
 		}
-		_ = m.store.SetStatus(event.TaskID, event.Status)
-		m.hub.PublishTaskStatus(event.TaskID, event.Status)
-	}
-}
-
-func (m *Manager) runProgressLoop(ctx context.Context) {
-	for {
-		event, err := m.bus.ReceiveProgress(ctx)
-		if err != nil {
-			return
+		if event.Type == models.EventTaskStatus {
+			status := models.TaskStatus(event.Status)
+			if status == models.TaskCompleted || status == models.TaskFailed {
+				_ = m.store.SetStatus(event.TaskID, status)
+			}
 		}
 		m.hub.Publish(event)
 	}

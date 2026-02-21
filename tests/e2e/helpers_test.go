@@ -39,17 +39,14 @@ type taskResponse struct {
 }
 
 type stageResponse struct {
-	Index    int    `json:"index"`
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	Progress int    `json:"progress"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
 }
 
 // SSEEvent represents a parsed server-sent event.
 type SSEEvent struct {
 	Type      string `json:"type"`
 	TaskID    string `json:"taskID"`
-	StageIdx  int    `json:"stageIdx"`
 	StageName string `json:"stageName"`
 	Progress  int    `json:"progress"`
 	Status    string `json:"status"`

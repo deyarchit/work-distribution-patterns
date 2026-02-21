@@ -5,11 +5,10 @@ import (
 
 	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/executor"
-	"work-distribution-patterns/shared/models"
 )
 
-// RunWorker loops indefinitely, pulling tasks from source, executing them,
-// and reporting status and progress back. It exits when ctx is cancelled.
+// RunWorker loops indefinitely, pulling tasks from source and executing them.
+// The executor emits all status and progress events via source (EventSink).
 // Each call to RunWorker should run in its own goroutine.
 func RunWorker(ctx context.Context, source contracts.TaskConsumer, exec *executor.Executor) {
 	for {
@@ -17,8 +16,6 @@ func RunWorker(ctx context.Context, source contracts.TaskConsumer, exec *executo
 		if err != nil {
 			return
 		}
-		_ = source.ReportResult(ctx, task.ID, models.TaskRunning)
-		status := exec.Run(ctx, task, source)
-		_ = source.ReportResult(ctx, task.ID, status)
+		exec.Run(ctx, task, source)
 	}
 }

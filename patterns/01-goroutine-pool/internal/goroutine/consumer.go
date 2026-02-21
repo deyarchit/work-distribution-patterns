@@ -11,11 +11,10 @@ import (
 var _ dispatch.TaskConsumer = (*ChannelConsumer)(nil)
 
 // ChannelConsumer is the worker-side view of the in-process channel transport.
-// It reads tasks from the manager and writes results/progress back.
+// It reads tasks from the manager and writes all events back over a single channel.
 type ChannelConsumer struct {
-	tasks    <-chan models.Task            // read-only:  receive tasks from manager
-	results  chan<- models.TaskStatusEvent // write-only: report results to manager
-	progress chan<- models.ProgressEvent   // write-only: report progress to manager
+	tasks  <-chan models.Task      // read-only:  receive tasks from manager
+	events chan<- models.TaskEvent // write-only: emit events to manager
 }
 
 // Connect is a no-op; channels are ready at construction time.
@@ -31,28 +30,19 @@ func (c *ChannelConsumer) Receive(ctx context.Context) (models.Task, error) {
 	}
 }
 
-// ReportResult sends a task status event to the results channel.
-// Terminal statuses (completed/failed) use a blocking send to ensure delivery.
-// Non-terminal statuses are dropped if the channel is full.
-func (c *ChannelConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
-	ev := models.TaskStatusEvent{TaskID: taskID, Status: status}
-	if status == models.TaskCompleted || status == models.TaskFailed {
-		c.results <- ev
+// Emit sends a TaskEvent to the manager. Terminal task_status events use a
+// blocking send to guarantee delivery. All other events are best-effort and
+// may be dropped if the channel is full.
+func (c *ChannelConsumer) Emit(_ context.Context, event models.TaskEvent) error {
+	isTerminal := event.Type == models.EventTaskStatus &&
+		(event.Status == string(models.TaskCompleted) || event.Status == string(models.TaskFailed))
+	if isTerminal {
+		c.events <- event // blocking: must not lose terminal status
 	} else {
 		select {
-		case c.results <- ev:
-		default:
+		case c.events <- event:
+		default: // drop progress/running events if channel is full
 		}
-	}
-	return nil
-}
-
-// ReportProgress sends a progress event to the progress channel.
-// Events are dropped if the channel is full (best-effort).
-func (c *ChannelConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
-	select {
-	case c.progress <- event:
-	default:
 	}
 	return nil
 }

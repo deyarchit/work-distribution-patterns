@@ -11,7 +11,6 @@ import (
 
 	wsinternal "work-distribution-patterns/patterns/02-websocket-hub/internal/websocket"
 	"work-distribution-patterns/shared/executor"
-	"work-distribution-patterns/shared/models"
 )
 
 type config struct {
@@ -39,10 +38,6 @@ func main() {
 			log.Printf("worker stopped: %v", err)
 			return
 		}
-		go func() {
-			_ = source.ReportResult(ctx, task.ID, models.TaskRunning)
-			status := exec.Run(ctx, task, source)
-			_ = source.ReportResult(ctx, task.ID, status)
-		}()
+		go exec.Run(ctx, task, source)
 	}
 }

@@ -10,12 +10,11 @@ import (
 // TaskProducer is the manager-side view of the execution substrate.
 // Start sets up any transport subscriptions (non-blocking).
 // Dispatch enqueues a task for a worker to process.
-// ReceiveResult and ReceiveProgress block until an event arrives or ctx is cancelled.
+// ReceiveEvent blocks until an event arrives or ctx is cancelled.
 type TaskProducer interface {
 	Start(ctx context.Context) error
 	Dispatch(ctx context.Context, task models.Task) error
-	ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error)
-	ReceiveProgress(ctx context.Context) (models.ProgressEvent, error)
+	ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 }
 
 // Sentinel errors returned by Dispatch; Manager maps these to HTTP status codes.

@@ -98,48 +98,29 @@ func (c *WebSocketConsumer) Receive(ctx context.Context) (models.Task, error) {
 	}
 }
 
-// ReportResult sends a task status event to the API over WebSocket.
-// Terminal statuses use DoneMsg; non-terminal statuses use StatusMsg.
-func (c *WebSocketConsumer) ReportResult(_ context.Context, taskID string, status models.TaskStatus) error {
-	var msg any
-	if status == models.TaskCompleted || status == models.TaskFailed {
-		msg = doneMsg{Type: msgTypeDone, TaskID: taskID, Status: status}
+// Emit sends a TaskEvent to the API over WebSocket.
+// Terminal task_status events use a blocking send to ensure delivery.
+// All other events are best-effort and may be dropped if the send buffer is full.
+func (c *WebSocketConsumer) Emit(_ context.Context, event models.TaskEvent) error {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	send := c.currentSend
+	c.mu.Unlock()
+	if send == nil {
+		return nil
+	}
+	isTerminal := event.Type == models.EventTaskStatus &&
+		(event.Status == string(models.TaskCompleted) || event.Status == string(models.TaskFailed))
+	if isTerminal {
+		send <- data // blocking: must not lose terminal status
 	} else {
-		msg = statusMsg{Type: msgTypeStatus, TaskID: taskID, Status: status}
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	c.mu.Lock()
-	send := c.currentSend
-	c.mu.Unlock()
-	if send == nil {
-		return nil
-	}
-	select {
-	case send <- data:
-	default:
-	}
-	return nil
-}
-
-// ReportProgress sends a stage progress event to the API over WebSocket.
-// Events are best-effort and may be dropped if the send buffer is full.
-func (c *WebSocketConsumer) ReportProgress(_ context.Context, event models.ProgressEvent) error {
-	data, err := json.Marshal(progressMsg{Type: msgTypeProgress, Event: event})
-	if err != nil {
-		return err
-	}
-	c.mu.Lock()
-	send := c.currentSend
-	c.mu.Unlock()
-	if send == nil {
-		return nil
-	}
-	select {
-	case send <- data:
-	default:
+		select {
+		case send <- data:
+		default:
+		}
 	}
 	return nil
 }
@@ -174,7 +155,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		}
 	}()
 
-	ready, _ := json.Marshal(readyMsg{Type: msgTypeReady})
+	ready, _ := json.Marshal(readyMsg{Type: "ready"})
 	send <- ready
 
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -205,26 +186,18 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
-		var gm genericMsg
-		if err := json.Unmarshal(raw, &gm); err != nil {
+		var msg taskMsg
+		if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != msgTypeTask {
 			continue
 		}
-
-		if gm.Type == msgTypeTask {
-			var msg taskMsg
-			if err := json.Unmarshal(raw, &msg); err != nil {
-				log.Printf("unmarshal task: %v", err)
-				continue
-			}
-			log.Printf("received task %s (%d stages)", msg.Task.ID, len(msg.Task.Stages))
-			select {
-			case c.tasks <- msg.Task:
-			case <-ctx.Done():
-				close(send)
-				<-done
-				_ = conn.Close()
-				return nil
-			}
+		log.Printf("received task %s (%d stages)", msg.Task.ID, len(msg.Task.Stages))
+		select {
+		case c.tasks <- msg.Task:
+		case <-ctx.Done():
+			close(send)
+			<-done
+			_ = conn.Close()
+			return nil
 		}
 	}
 }

@@ -17,36 +17,13 @@ import (
 // Compile-time interface check.
 var _ dispatch.TaskProducer = (*WebSocketProducer)(nil)
 
-// Message type constants for the WebSocket protocol.
-const (
-	msgTypeReady    = "ready"
-	msgTypeTask     = "task"
-	msgTypeProgress = "progress"
-	msgTypeStatus   = "status" // non-terminal task status
-	msgTypeDone     = "done"   // terminal task status
-)
+// msgTypeTask is sent from the API to a worker carrying the task to execute.
+const msgTypeTask = "task"
 
-// Unexported message types — only used inside this package.
-type genericMsg struct {
-	Type string `json:"type"`
-}
+// taskMsg wraps a Task for delivery to a worker over WebSocket.
 type taskMsg struct {
 	Type string      `json:"type"`
 	Task models.Task `json:"task"`
-}
-type progressMsg struct {
-	Type  string               `json:"type"`
-	Event models.ProgressEvent `json:"event"`
-}
-type statusMsg struct {
-	Type   string            `json:"type"`
-	TaskID string            `json:"taskId"`
-	Status models.TaskStatus `json:"status"`
-}
-type doneMsg struct {
-	Type   string            `json:"type"`
-	TaskID string            `json:"taskId"`
-	Status models.TaskStatus `json:"status"`
 }
 
 // workerConn represents a connected remote worker.
@@ -61,18 +38,16 @@ type workerConn struct {
 // WebSocketProducer manages connected remote workers and implements TaskProducer.
 // Workers connect via HTTP GET /ws/register; Register is called by that handler.
 type WebSocketProducer struct {
-	mu       sync.Mutex
-	workers  []*workerConn
-	nextIdx  int
-	results  chan models.TaskStatusEvent
-	progress chan models.ProgressEvent
+	mu      sync.Mutex
+	workers []*workerConn
+	nextIdx int
+	events  chan models.TaskEvent
 }
 
-// NewWebSocketProducer creates a WebSocketProducer with buffered result and progress channels.
+// NewWebSocketProducer creates a WebSocketProducer with a buffered event channel.
 func NewWebSocketProducer() *WebSocketProducer {
 	return &WebSocketProducer{
-		results:  make(chan models.TaskStatusEvent, 256),
-		progress: make(chan models.ProgressEvent, 256),
+		events: make(chan models.TaskEvent, 256),
 	}
 }
 
@@ -130,22 +105,12 @@ func (p *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error 
 	return dispatch.ErrNoWorkers
 }
 
-// ReceiveResult blocks until a task status event is available or ctx is cancelled.
-func (p *WebSocketProducer) ReceiveResult(ctx context.Context) (models.TaskStatusEvent, error) {
+// ReceiveEvent blocks until an event is available or ctx is cancelled.
+func (p *WebSocketProducer) ReceiveEvent(ctx context.Context) (models.TaskEvent, error) {
 	select {
 	case <-ctx.Done():
-		return models.TaskStatusEvent{}, ctx.Err()
-	case ev := <-p.results:
-		return ev, nil
-	}
-}
-
-// ReceiveProgress blocks until a progress event is available or ctx is cancelled.
-func (p *WebSocketProducer) ReceiveProgress(ctx context.Context) (models.ProgressEvent, error) {
-	select {
-	case <-ctx.Done():
-		return models.ProgressEvent{}, ctx.Err()
-	case ev := <-p.progress:
+		return models.TaskEvent{}, ctx.Err()
+	case ev := <-p.events:
 		return ev, nil
 	}
 }
@@ -188,10 +153,9 @@ func (wc *workerConn) writePump() {
 	}
 }
 
-// readPump processes messages from the worker.
-// Progress events are forwarded to the hub's progress channel.
-// Status and done events are forwarded to the hub's results channel.
-// DoneMsg also marks the worker as no longer busy.
+// readPump processes TaskEvent messages from the worker.
+// Terminal task_status events mark the worker as idle and use a blocking send.
+// All other events are forwarded best-effort.
 func (wc *workerConn) readPump() {
 	defer func() {
 		wc.hub.remove(wc)
@@ -217,38 +181,31 @@ func (wc *workerConn) readPump() {
 		}
 		_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
-		var gm genericMsg
-		if err := json.Unmarshal(raw, &gm); err != nil {
+		var ev models.TaskEvent
+		if err := json.Unmarshal(raw, &ev); err != nil {
 			continue
 		}
 
-		switch gm.Type {
-		case msgTypeProgress:
-			var msg progressMsg
-			if err := json.Unmarshal(raw, &msg); err == nil {
-				select {
-				case wc.hub.progress <- msg.Event:
-				default:
-				}
-			}
-
-		case msgTypeStatus:
-			var msg statusMsg
-			if err := json.Unmarshal(raw, &msg); err == nil {
-				wc.hub.results <- models.TaskStatusEvent{TaskID: msg.TaskID, Status: msg.Status}
-			}
-
-		case msgTypeDone:
-			var msg doneMsg
-			if err := json.Unmarshal(raw, &msg); err == nil {
-				wc.hub.results <- models.TaskStatusEvent{TaskID: msg.TaskID, Status: msg.Status}
+		switch ev.Type {
+		case models.EventTaskStatus:
+			isTerminal := ev.Status == string(models.TaskCompleted) || ev.Status == string(models.TaskFailed)
+			if isTerminal {
+				wc.hub.events <- ev // blocking: must not lose terminal status
 				wc.hub.mu.Lock()
 				wc.busy = false
 				wc.hub.mu.Unlock()
+			} else {
+				select {
+				case wc.hub.events <- ev:
+				default:
+				}
 			}
-
-		case msgTypeReady:
-			log.Printf("worker %s ready", wc.id)
+		case models.EventProgress:
+			select {
+			case wc.hub.events <- ev:
+			default:
+			}
 		}
+		// Unknown types (e.g., "ready") are silently ignored.
 	}
 }
