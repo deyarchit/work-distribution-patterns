@@ -19,4 +19,7 @@ import (
 // knowledge of stores, SSE, or browsers.
 type TaskManager interface {
 	Submit(ctx context.Context, task models.Task) error
+	Get(ctx context.Context, id string) (models.Task, bool)
+	List(ctx context.Context) []models.Task
+	Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 }

@@ -10,8 +10,8 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 
-	natsinternal "work-distribution-patterns/patterns/03-queue-and-store/internal/nats"
-	pgstore "work-distribution-patterns/patterns/03-queue-and-store/internal/postgres"
+	natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
+	pgstore "work-distribution-patterns/patterns/04-queue-and-store/internal/postgres"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/sse"
@@ -71,7 +71,7 @@ func main() {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, hub, tpl, mgr)
-	log.Printf("Pattern 3 (Queue-and-Store) API listening on %s", cfg.Addr)
+	e := api.NewRouter(hub, tpl, mgr)
+	log.Printf("Pattern 4 (Queue-and-Store) API listening on %s", cfg.Addr)
 	log.Fatal(e.Start(cfg.Addr))
 }

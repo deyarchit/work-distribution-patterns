@@ -25,7 +25,7 @@ services:
   api:
     build:
       context: ../..
-      dockerfile: patterns/03-queue-and-store/Dockerfile.api
+      dockerfile: patterns/04-queue-and-store/Dockerfile.api
     environment:
       - ADDR=:8080
       - NATS_URL=nats://nats:4222
@@ -48,7 +48,7 @@ services:
   worker:
     build:
       context: ../..
-      dockerfile: patterns/03-queue-and-store/Dockerfile.worker
+      dockerfile: patterns/04-queue-and-store/Dockerfile.worker
     environment:
       - NATS_URL=nats://nats:4222
     depends_on:

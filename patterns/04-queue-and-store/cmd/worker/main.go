@@ -10,7 +10,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 
-	natsinternal "work-distribution-patterns/patterns/03-queue-and-store/internal/nats"
+	natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
 	"work-distribution-patterns/shared/executor"
 )
 
@@ -49,7 +49,7 @@ func main() {
 	source := natsinternal.NewNATSConsumer(nc, js)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	log.Printf("Pattern 3 worker listening on NATS %s", cfg.NATSURL)
+	log.Printf("Pattern 4 worker listening on NATS %s", cfg.NATSURL)
 
 	_ = source.Connect(ctx)
 

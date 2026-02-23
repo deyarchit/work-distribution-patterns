@@ -1,5 +1,21 @@
 # Codemap Rationale Log
 
+## 0617358 — 2026-02-23
+Commits: `a3caca0..0617358` (Pattern 2 REST polling, renumber patterns, expand TaskManager, API layer refactor)
+
+### Decisions
+- **Insert REST Polling as Pattern 2, renumber old P2→P3, P3→P4**: Introduces a more gradual architectural progression — goroutines → REST polling → WebSocket → NATS+Postgres. Each step adds exactly one new complexity (cross-process boundary, long-lived connections, persistent queuing).
+
+- **Expand `contracts.TaskManager` with `Get/List/Subscribe`**: The API layer should never access the store directly — all reads flow through the manager. This discipline is essential for Pattern 2 where API and manager are separate processes. `Subscribe` streams `TaskEvent` from the manager's hub over SSE, letting the API pump events into its local hub without the manager knowing about the API.
+
+- **Pattern 2 manager uses custom `POST /tasks` handler (not `api.NewRouter`)**: `api.NewRouter` uses `SubmitTask` which creates a new Task from `{name, stage_count}`. The API process already called `models.NewTask(...)` — the manager must accept a fully-formed Task to preserve the UUID. Using `api.NewRouter` would create a second task with a different ID.
+  ```go
+  // manager: accept full Task, not submitRequest
+  e.POST("/tasks", func(c echo.Context) error { c.Bind(&task); mgr.Submit(ctx, task) })
+  ```
+
+- **`RemoteTaskManager.sseLoop` uses a separate `http.Client{}` with no timeout**: The main client has a 10 s timeout (correct for request/response calls). An SSE connection is intentionally long-lived — applying a timeout would disconnect it.
+
 ## e927fc3 — 2026-02-20
 Commits: `5054cca..e927fc3` (+ uncommitted rename + PostgreSQL work)
 

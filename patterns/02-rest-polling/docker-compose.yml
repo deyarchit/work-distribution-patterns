@@ -1,0 +1,47 @@
+services:
+  manager:
+    build:
+      context: ../..
+      dockerfile: patterns/02-rest-polling/Dockerfile.manager
+    ports:
+      - "8081:8081"
+    environment:
+      - ADDR=:8081
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: patterns/02-rest-polling/Dockerfile.api
+    ports:
+      - "8080:8080"
+    environment:
+      - ADDR=:8080
+      - MANAGER_URL=http://manager:8081
+    depends_on:
+      manager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: patterns/02-rest-polling/Dockerfile.worker
+    environment:
+      - MANAGER_URL=http://manager:8081
+    depends_on:
+      manager:
+        condition: service_healthy
+    restart: on-failure
+    deploy:
+      replicas: 3

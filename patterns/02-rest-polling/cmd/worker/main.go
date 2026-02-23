@@ -9,12 +9,12 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 
-	wsinternal "work-distribution-patterns/patterns/02-websocket-hub/internal/websocket"
+	restinternal "work-distribution-patterns/patterns/02-rest-polling/internal/rest"
 	"work-distribution-patterns/shared/executor"
 )
 
 type config struct {
-	APIURL           string `envconfig:"api_url" default:"ws://localhost:8080/ws/register"`
+	ManagerURL       string `envconfig:"manager_url" default:"http://localhost:8081"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
 }
 
@@ -27,10 +27,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := wsinternal.NewWebSocketConsumer(cfg.APIURL)
+	source := restinternal.NewRESTConsumer(cfg.ManagerURL)
+	_ = source.Connect(ctx)
+
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	_ = source.Connect(ctx)
+	log.Printf("Pattern 2 (REST Polling) Worker connecting to %s", cfg.ManagerURL)
 
 	for {
 		task, err := source.Receive(ctx)

@@ -11,7 +11,6 @@ import (
 	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
 )
 
 type submitRequest struct {
@@ -52,21 +51,18 @@ func SubmitTask(manager contracts.TaskManager) echo.HandlerFunc {
 }
 
 // ListTasks handles GET /tasks.
-func ListTasks(taskStore store.TaskStore) echo.HandlerFunc {
+func ListTasks(manager contracts.TaskManager) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		tasks := taskStore.List()
-		if tasks == nil {
-			tasks = []models.Task{}
-		}
+		tasks := manager.List(c.Request().Context())
 		return c.JSON(http.StatusOK, tasks)
 	}
 }
 
 // GetTask handles GET /tasks/:id.
-func GetTask(taskStore store.TaskStore) echo.HandlerFunc {
+func GetTask(manager contracts.TaskManager) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		id := c.Param("id")
-		task, ok := taskStore.Get(id)
+		task, ok := manager.Get(c.Request().Context(), id)
 		if !ok {
 			return echo.NewHTTPError(http.StatusNotFound, "task not found")
 		}

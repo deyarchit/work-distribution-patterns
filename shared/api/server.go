@@ -8,12 +8,10 @@ import (
 
 	"work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
 )
 
 // NewRouter creates and configures the Echo router with all routes.
 func NewRouter(
-	taskStore store.TaskStore,
 	hub *sse.Hub,
 	tpl *template.Template,
 	manager contracts.TaskManager,
@@ -40,8 +38,8 @@ func NewRouter(
 	})
 
 	e.POST("/tasks", SubmitTask(manager))
-	e.GET("/tasks", ListTasks(taskStore))
-	e.GET("/tasks/:id", GetTask(taskStore))
+	e.GET("/tasks", ListTasks(manager))
+	e.GET("/tasks/:id", GetTask(manager))
 	e.GET("/events", SSEStream(hub))
 	e.GET("/", Index(tpl))
 

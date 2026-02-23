@@ -1,4 +1,4 @@
-last-sha: e927fc3061e6071046447d9933c5d2161663f55b
-updated: 2026-02-20
-commit-range: 5054cca..e927fc3
+last-sha: 0617358258f210256f7fed182c9f649941ee2c33
+updated: 2026-02-23
+commit-range: a3caca0..0617358
 codemaps-touched: docs/CODEMAPS/architecture.md docs/CODEMAPS/backend.md docs/CODEMAPS/dependencies.md docs/CODEMAPS/rationale.md

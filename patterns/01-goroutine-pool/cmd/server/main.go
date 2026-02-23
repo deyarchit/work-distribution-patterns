@@ -50,7 +50,7 @@ func main() {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, hub, tpl, mgr)
+	e := api.NewRouter(hub, tpl, mgr)
 	log.Printf("Pattern 1 (Goroutine Pool) listening on %s [workers=%d, queue=%d, maxStage=%s]",
 		cfg.Addr, cfg.Workers, cfg.QueueSize, exec.MaxStageDuration)
 	log.Fatal(e.Start(cfg.Addr))

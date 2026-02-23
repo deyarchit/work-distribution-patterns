@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -62,6 +63,52 @@ func (m *Manager) Submit(ctx context.Context, task models.Task) error {
 
 	_ = m.store.SetDispatchedAt(task.ID, time.Now())
 	return nil
+}
+
+// Get returns the task with the given id from the store.
+func (m *Manager) Get(_ context.Context, id string) (models.Task, bool) {
+	return m.store.Get(id)
+}
+
+// List returns all tasks from the store.
+func (m *Manager) List(_ context.Context) []models.Task {
+	tasks := m.store.List()
+	if tasks == nil {
+		return []models.Task{}
+	}
+	return tasks
+}
+
+// Subscribe returns a channel that receives all TaskEvents published to the
+// hub. The channel is closed when ctx is cancelled. Used by Pattern 2's API
+// process to pump events into its local SSE hub.
+func (m *Manager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
+	out := make(chan models.TaskEvent, 64)
+	raw, unsub := m.hub.Subscribe("")
+	go func() {
+		defer close(out)
+		defer unsub()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case data, ok := <-raw:
+				if !ok {
+					return
+				}
+				var ev models.TaskEvent
+				if err := json.Unmarshal(data, &ev); err != nil {
+					continue
+				}
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out, nil
 }
 
 // Start initialises the bus then launches the event and deadline goroutines.

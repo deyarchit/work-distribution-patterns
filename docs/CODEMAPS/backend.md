@@ -1,4 +1,4 @@
-<!-- Commit: e927fc3061e6071046447d9933c5d2161663f55b | Files scanned: 27 | Token estimate: ~700 -->
+<!-- Commit: 0617358258f210256f7fed182c9f649941ee2c33 | Files scanned: 38 | Token estimate: ~820 -->
 
 # Backend Codemap
 
@@ -16,27 +16,36 @@
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
 | `p01/internal/goroutine` | `producer.go`, `consumer.go` | `ChannelProducer`+`ChannelConsumer` (single shared `events chan TaskEvent`); constructed together by `New` |
 | `p01/internal/worker` | `worker.go` | `RunWorker`: `Receive` → `exec.Run(ctx, task, source)` loop |
-| `p02/internal/websocket` (pkg `wsinternal`) | `producer.go`, `consumer.go` | `WebSocketProducer` (TaskProducer): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
-| `p03/internal/nats` (pkg `natsinternal`) | `producer.go`, `consumer.go`, `setup.go` | `NATSProducer`, `NATSConsumer`, JetStream stream setup |
-| `p03/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
+| `p02/internal/rest` (pkg `rest`) | `producer.go`, `consumer.go` | `RESTProducer` (TaskProducer): buffered chan + HTTP handlers `/work/next`, `/work/events`; `RESTConsumer` (TaskConsumer): polling loop |
+| `p02/internal/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying HTTP calls to manager process; `sseLoop` goroutine for cross-process event subscription |
+| `p03/internal/websocket` (pkg `wsinternal`) | `producer.go`, `consumer.go` | `WebSocketProducer` (TaskProducer): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
+| `p04/internal/nats` (pkg `natsinternal`) | `producer.go`, `consumer.go`, `setup.go` | `NATSProducer`, `NATSConsumer`, JetStream stream setup |
+| `p04/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
 
 ## API Routes (`shared/api`)
 
 | Method | Path | Handler |
 |--------|------|---------|
-| POST | `/tasks` | `SubmitTask` — creates task, delegates to `TaskManager.Submit` |
-| GET | `/tasks` | `ListTasks` — returns all tasks as JSON |
-| GET | `/tasks/:id` | `GetTask` — returns single task as JSON |
+| POST | `/tasks` | `SubmitTask` — creates task via `models.NewTask`, delegates to `TaskManager.Submit` |
+| GET | `/tasks` | `ListTasks(manager)` — proxies to `TaskManager.List(ctx)` |
+| GET | `/tasks/:id` | `GetTask(manager)` — proxies to `TaskManager.Get(ctx, id)` |
 | GET | `/events` | `SSEStream` — subscribes to `sse.Hub` (`?taskID=` for scoped; empty = global) |
 | GET | `/health` | `Health` — returns `200 ok`; excluded from Echo request logs via skipper |
 | GET | `/` | `Index` — serves HTMX page |
-| GET | `/ws/register` | Pattern 2 only — worker WebSocket registration |
+| GET | `/ws/register` | Pattern 3 only — worker WebSocket registration |
+| GET | `/work/next` | Pattern 2 manager only — worker polls for next task |
+| POST | `/work/events` | Pattern 2 manager only — worker posts progress/status events |
 
 ## Key Type Signatures
 
 ```go
 // contracts/manager.go
-type TaskManager interface { Submit(ctx context.Context, task models.Task) error }
+type TaskManager interface {
+    Submit(ctx context.Context, task models.Task) error
+    Get(ctx context.Context, id string) (models.Task, bool)
+    List(ctx context.Context) []models.Task
+    Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+}
 
 // contracts/producer.go — manager-side transport view
 type TaskProducer interface {
@@ -57,41 +66,24 @@ type TaskConsumer interface {
 // contracts/sink.go — executor emits via this; TaskConsumer satisfies it automatically
 type EventSink interface { Emit(ctx context.Context, event models.TaskEvent) error }
 
+// shared/api/server.go
+func NewRouter(hub *sse.Hub, tpl *template.Template, manager contracts.TaskManager) *echo.Echo
+
 // manager/manager.go
 func New(s store.TaskStore, bus contracts.TaskProducer, hub *sse.Hub, deadline time.Duration) *Manager
 func (m *Manager) Start(ctx context.Context)   // non-blocking; launches runEventLoop + deadline goroutines
 func (m *Manager) Submit(ctx context.Context, task models.Task) error
-
-// executor/executor.go
-type Executor struct { MaxStageDuration time.Duration }
-func (e *Executor) Run(ctx context.Context, task models.Task, sink contracts.EventSink)
-// Emits: task_status=running → progress per stage → task_status=completed|failed
-
-// models/task.go — unified event type
-type TaskEvent struct {
-    Type      string  // EventProgress | EventTaskStatus
-    TaskID    string
-    StageName string  // EventProgress only
-    Progress  int     // 0–100, EventProgress only
-    Status    string  // EventTaskStatus only
-}
-const EventProgress = "progress"; const EventTaskStatus = "task_status"
-
-// store/store.go
-type TaskStore interface {
-    Create(task models.Task) error
-    Get(id string) (models.Task, bool)
-    List() []models.Task
-    SetStatus(id string, status models.TaskStatus) error
-    SetDispatchedAt(id string, t time.Time) error
-}
+func (m *Manager) Get(_ context.Context, id string) (models.Task, bool)
+func (m *Manager) List(_ context.Context) []models.Task
+func (m *Manager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 ```
 
 ## Pattern-Specific Notes
 
 **Pattern 1** — `ChannelProducer`+`ChannelConsumer` share a single `events chan TaskEvent` (created together by `New`). Directional channel types enforce ownership at compile time. `RunWorker` loops: `Receive` → `exec.Run(ctx, task, source)`; executor handles all event emission. Deadline disabled (`deadline=0`).
 
-**Pattern 2** — `WebSocketProducer.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. All message types are unexported and co-located in `internal/websocket` (package `wsinternal`). `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Deadline disabled.
+**Pattern 2** — Three separate processes: API, Manager, Worker. `RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP and `Subscribe` via SSE pump. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTProducer.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Deadline disabled.
 
-**Pattern 3** — `NATSProducer.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.
+**Pattern 3** — `WebSocketProducer.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. All message types are unexported and co-located in `internal/websocket` (package `wsinternal`). `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Deadline disabled.
 
+**Pattern 4** — `NATSProducer.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.

@@ -10,7 +10,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/labstack/echo/v4"
 
-	wsinternal "work-distribution-patterns/patterns/02-websocket-hub/internal/websocket"
+	wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/sse"
@@ -45,7 +45,7 @@ func main() {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(taskStore, sseHub, tpl, mgr)
+	e := api.NewRouter(sseHub, tpl, mgr)
 
 	// Worker WebSocket registration endpoint.
 	e.GET("/ws/register", func(c echo.Context) error {
@@ -57,6 +57,6 @@ func main() {
 		return nil
 	})
 
-	log.Printf("Pattern 2 (WebSocket Hub) API listening on %s", cfg.Addr)
+	log.Printf("Pattern 3 (WebSocket Hub) API listening on %s", cfg.Addr)
 	log.Fatal(e.Start(cfg.Addr))
 }
