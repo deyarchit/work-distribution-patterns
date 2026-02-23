@@ -4,24 +4,18 @@ import (
 	"context"
 	"html/template"
 	"log"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/nats-io/nats.go"
 
-	natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
-	pgstore "work-distribution-patterns/patterns/04-queue-and-store/internal/postgres"
 	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/client"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
 
 type config struct {
-	Addr        string `envconfig:"addr" default:":8080"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
 }
 
 func main() {
@@ -32,46 +26,24 @@ func main() {
 
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
-	if err != nil {
-		log.Fatalf("postgres connect: %v", err)
-	}
-	defer pool.Close()
-
-	taskStore, err := pgstore.New(ctx, pool)
-	if err != nil {
-		log.Fatalf("postgres store: %v", err)
-	}
-
-	nc, err := nats.Connect(cfg.NATSURL,
-		nats.MaxReconnects(-1),
-		nats.RetryOnFailedConnect(true),
-	)
-	if err != nil {
-		log.Fatalf("nats connect: %v", err)
-	}
-	defer nc.Close()
-
-	js, err := nc.JetStream()
-	if err != nil {
-		log.Fatalf("jetstream: %v", err)
-	}
-
-	if err := natsinternal.SetupJetStream(js); err != nil {
-		log.Printf("setup warning: %v", err)
-	}
-
+	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL)
 	hub := sse.NewHub()
-	natsBus := natsinternal.NewNATSProducer(nc, js)
-	mgr := manager.New(taskStore, natsBus, hub, 30*time.Second)
-	mgr.Start(ctx)
+
+	// Pump manager SSE events into the local hub so browser clients connected
+	// to this API process receive real-time progress updates.
+	ch, _ := taskManager.Subscribe(ctx)
+	go func() {
+		for ev := range ch {
+			hub.Publish(ev)
+		}
+	}()
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(hub, tpl, mgr)
-	log.Printf("Pattern 4 (Queue-and-Store) API listening on %s", cfg.Addr)
+	e := api.NewRouter(hub, tpl, taskManager)
+	log.Printf("Pattern 4 (Queue-and-Store) API listening on %s [manager=%s]", cfg.Addr, cfg.ManagerURL)
 	log.Fatal(e.Start(cfg.Addr))
 }

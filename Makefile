@@ -13,14 +13,14 @@ run-p2:
 stop-p2:
 	docker compose -f patterns/02-rest-polling/docker-compose.yml down
 
-## Run Pattern 3 with Docker Compose (1 API + 3 workers)
+## Run Pattern 3 with Docker Compose (1 manager + 1 API + 3 workers)
 run-p3:
 	docker compose -f patterns/03-websocket-hub/docker-compose.yml up --build
 
 stop-p3:
 	docker compose -f patterns/03-websocket-hub/docker-compose.yml down
 
-## Run Pattern 4 with Docker Compose (3 APIs + 3 workers + NATS + nginx)
+## Run Pattern 4 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + postgres + nginx)
 run-p4:
 	docker compose -f patterns/04-queue-and-store/docker-compose.yml up --build
 
@@ -35,16 +35,18 @@ test-e2e:
 test-load:
 	go run ./tests/load/load.go -url $(BASE_URL)
 
-## Build all eight binaries
+## Build all binaries
 build-all:
-	go build -o bin/p1-server  ./patterns/01-goroutine-pool/cmd/server
-	go build -o bin/p2-api     ./patterns/02-rest-polling/cmd/api
-	go build -o bin/p2-manager ./patterns/02-rest-polling/cmd/manager
-	go build -o bin/p2-worker  ./patterns/02-rest-polling/cmd/worker
-	go build -o bin/p3-api     ./patterns/03-websocket-hub/cmd/api
-	go build -o bin/p3-worker  ./patterns/03-websocket-hub/cmd/worker
-	go build -o bin/p4-api     ./patterns/04-queue-and-store/cmd/api
-	go build -o bin/p4-worker  ./patterns/04-queue-and-store/cmd/worker
+	go build -o bin/p1-server    ./patterns/01-goroutine-pool/cmd/server
+	go build -o bin/p2-api       ./patterns/02-rest-polling/cmd/api
+	go build -o bin/p2-manager   ./patterns/02-rest-polling/cmd/manager
+	go build -o bin/p2-worker    ./patterns/02-rest-polling/cmd/worker
+	go build -o bin/p3-api       ./patterns/03-websocket-hub/cmd/api
+	go build -o bin/p3-manager   ./patterns/03-websocket-hub/cmd/manager
+	go build -o bin/p3-worker    ./patterns/03-websocket-hub/cmd/worker
+	go build -o bin/p4-api       ./patterns/04-queue-and-store/cmd/api
+	go build -o bin/p4-manager   ./patterns/04-queue-and-store/cmd/manager
+	go build -o bin/p4-worker    ./patterns/04-queue-and-store/cmd/worker
 
 ## Build all binaries and validate all four patterns end-to-end
 test-all: build-all

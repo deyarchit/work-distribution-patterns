@@ -14,7 +14,7 @@ import (
 )
 
 type config struct {
-	APIURL           string `envconfig:"api_url" default:"ws://localhost:8080/ws/register"`
+	ManagerURL       string `envconfig:"manager_url" default:"ws://localhost:8081/ws/register"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
 }
 
@@ -27,7 +27,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := wsinternal.NewWebSocketConsumer(cfg.APIURL)
+	source := wsinternal.NewWebSocketConsumer(cfg.ManagerURL)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	_ = source.Connect(ctx)

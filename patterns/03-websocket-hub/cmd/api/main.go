@@ -4,28 +4,18 @@ import (
 	"context"
 	"html/template"
 	"log"
-	"net/http"
 
-	"github.com/gorilla/websocket"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
 
-	wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
 	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/client"
 	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
 	"work-distribution-patterns/shared/templates"
 )
 
 type config struct {
-	Addr string `envconfig:"addr" default:":8080"`
-}
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
 }
 
 func main() {
@@ -34,29 +24,26 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	sseHub := sse.NewHub()
-	taskStore := store.NewMemoryStore()
-	workerBus := wsinternal.NewWebSocketProducer()
-	mgr := manager.New(taskStore, workerBus, sseHub, 0) // deadline=0; workers always connected
-	mgr.Start(context.Background())
+	ctx := context.Background()
+
+	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL)
+	hub := sse.NewHub()
+
+	// Pump manager SSE events into the local hub so browser clients connected
+	// to this API process receive real-time progress updates.
+	ch, _ := taskManager.Subscribe(ctx)
+	go func() {
+		for ev := range ch {
+			hub.Publish(ev)
+		}
+	}()
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	e := api.NewRouter(sseHub, tpl, mgr)
-
-	// Worker WebSocket registration endpoint.
-	e.GET("/ws/register", func(c echo.Context) error {
-		conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
-		if err != nil {
-			return err
-		}
-		workerBus.Register(conn)
-		return nil
-	})
-
-	log.Printf("Pattern 3 (WebSocket Hub) API listening on %s", cfg.Addr)
+	e := api.NewRouter(hub, tpl, taskManager)
+	log.Printf("Pattern 3 (WebSocket Hub) API listening on %s [manager=%s]", cfg.Addr, cfg.ManagerURL)
 	log.Fatal(e.Start(cfg.Addr))
 }

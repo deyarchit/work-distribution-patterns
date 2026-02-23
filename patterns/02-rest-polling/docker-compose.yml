@@ -3,10 +3,9 @@ services:
     build:
       context: ../..
       dockerfile: patterns/02-rest-polling/Dockerfile.manager
-    ports:
-      - "8081:8081"
     environment:
       - ADDR=:8081
+    restart: on-failure
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
       interval: 2s
@@ -18,14 +17,15 @@ services:
     build:
       context: ../..
       dockerfile: patterns/02-rest-polling/Dockerfile.api
-    ports:
-      - "8080:8080"
     environment:
       - ADDR=:8080
       - MANAGER_URL=http://manager:8081
+    ports:
+      - "8080:8080"
     depends_on:
       manager:
         condition: service_healthy
+    restart: on-failure
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 2s

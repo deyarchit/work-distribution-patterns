@@ -16,7 +16,7 @@ import (
 )
 
 // RemoteTaskManager implements contracts.TaskManager by proxying all calls
-// to the manager process over HTTP. Used by the API process in Pattern 2.
+// to the manager process over HTTP. Used by the API process in Patterns 2, 3, and 4.
 type RemoteTaskManager struct {
 	baseURL    string
 	httpClient *http.Client

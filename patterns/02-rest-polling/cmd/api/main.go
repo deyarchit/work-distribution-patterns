@@ -7,8 +7,8 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 
-	"work-distribution-patterns/patterns/02-rest-polling/internal/client"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )

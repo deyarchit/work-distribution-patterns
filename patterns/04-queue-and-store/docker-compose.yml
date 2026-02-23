@@ -22,12 +22,12 @@ services:
     volumes:
       - ./nats.conf:/etc/nats/nats.conf:ro
 
-  api:
+  manager:
     build:
       context: ../..
-      dockerfile: patterns/04-queue-and-store/Dockerfile.api
+      dockerfile: patterns/04-queue-and-store/Dockerfile.manager
     environment:
-      - ADDR=:8080
+      - ADDR=:8081
       - NATS_URL=nats://nats:4222
       - DATABASE_URL=postgres://tasks:tasks@postgres:5432/tasks?sslmode=disable
     depends_on:
@@ -35,6 +35,24 @@ services:
         condition: service_healthy
       nats:
         condition: service_started
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: patterns/04-queue-and-store/Dockerfile.api
+    environment:
+      - ADDR=:8080
+      - MANAGER_URL=http://manager:8081
+    depends_on:
+      manager:
+        condition: service_healthy
     restart: on-failure
     deploy:
       replicas: 3
@@ -66,4 +84,3 @@ services:
     depends_on:
       api:
         condition: service_healthy
-
