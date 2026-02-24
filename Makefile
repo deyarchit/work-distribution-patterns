@@ -91,3 +91,8 @@ lint:
 ## Format with golangci-lint (auto-fix formatting)
 fmt:
 	golangci-lint fmt ./...
+
+
+## Update repomap
+update-repomap:
+	npx repomix@latest

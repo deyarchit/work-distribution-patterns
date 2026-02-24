@@ -1,0 +1,12 @@
+# Add patterns to ignore here, one per line
+# Example:
+# *.log
+# tmp/
+.claude/
+.reports/
+.repomixignore
+docs/*
+.golangci.yml
+**/Dockerfile*
+**/docker-compose.yml
+shared/templates/index.html

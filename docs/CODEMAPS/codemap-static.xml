@@ -1,0 +1,1775 @@
+<directory_structure>
+docs/
+patterns/
+  01-goroutine-pool/
+    cmd/
+      server/
+        main.go
+    internal/
+      goroutine/
+        consumer.go
+        dispatcher.go
+      worker/
+        worker.go
+  02-rest-polling/
+    cmd/
+      api/
+        main.go
+      manager/
+        main.go
+      worker/
+        main.go
+    internal/
+      rest/
+        consumer.go
+        dispatcher.go
+  03-websocket-hub/
+    cmd/
+      api/
+        main.go
+      manager/
+        main.go
+      worker/
+        main.go
+    internal/
+      websocket/
+        consumer.go
+        dispatcher.go
+  04-queue-and-store/
+    cmd/
+      api/
+        main.go
+      manager/
+        main.go
+      worker/
+        main.go
+    internal/
+      nats/
+        consumer.go
+        dispatcher.go
+        setup.go
+      postgres/
+        store.go
+    nginx/
+shared/
+  api/
+    handlers.go
+    server.go
+  client/
+    manager.go
+  contracts/
+    consumer.go
+    manager.go
+    producer.go
+  events/
+    events.go
+    memory.go
+    nats.go
+  executor/
+    executor.go
+  manager/
+    manager.go
+  models/
+    task.go
+  sse/
+    client.go
+    hub.go
+  store/
+    memory.go
+    store.go
+  templates/
+    embed.go
+tests/
+  e2e/
+    helpers_test.go
+    task_test.go
+  load/
+    load.go
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="patterns/01-goroutine-pool/internal/goroutine/dispatcher.go">
+package goroutine
+import (
+	"context"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskDispatcher = (*ChannelDispatcher)(nil)
+// ChannelDispatcher is the manager-side view of the in-process channel transport.
+// It writes tasks to workers and reads events back over a single ordered channel.
+type ChannelDispatcher struct {
+	tasks  chan<- models.Task      // write-only: dispatch tasks to workers
+	events <-chan models.TaskEvent // read-only:  receive events from workers
+}
+⋮----
+tasks  chan<- models.Task      // write-only: dispatch tasks to workers
+events <-chan models.TaskEvent // read-only:  receive events from workers
+⋮----
+// New creates a linked ChannelDispatcher and ChannelConsumer sharing the same
+// buffered channels. tasks is buffered to queueSize; events to 256.
+func New(queueSize int) (*ChannelDispatcher, *ChannelConsumer)
+// Start is a no-op; channels are ready at construction time.
+func (p *ChannelDispatcher) Start(_ context.Context) error
+// Dispatch sends the task to the tasks channel.
+// Returns ErrDispatchFull immediately if the channel is at capacity.
+func (p *ChannelDispatcher) Dispatch(_ context.Context, task models.Task) error
+// ReceiveEvent blocks until an event is available or ctx is cancelled.
+func (p *ChannelDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+</file>
+
+<file path="patterns/02-rest-polling/internal/rest/consumer.go">
+package rest
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"time"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"bytes"
+"context"
+"encoding/json"
+"net/http"
+"time"
+"work-distribution-patterns/shared/models"
+⋮----
+// RESTConsumer implements contracts.TaskConsumer.
+// It polls the manager's REST endpoints for tasks and emits events back.
+type RESTConsumer struct {
+	managerURL string
+	httpClient *http.Client
+}
+// NewRESTConsumer creates a RESTConsumer that targets the given manager base URL.
+func NewRESTConsumer(managerURL string) *RESTConsumer
+// Connect implements contracts.TaskConsumer — no-op; polling starts in Receive.
+func (c *RESTConsumer) Connect(_ context.Context) error
+// Receive implements contracts.TaskConsumer.
+// Polls GET /work/next: 204 → sleep 500 ms; 200 → decode and return; error → sleep 2 s.
+// All sleeps respect ctx cancellation.
+func (c *RESTConsumer) Receive(ctx context.Context) (models.Task, error)
+⋮----
+var task models.Task
+⋮----
+// Emit implements contracts.TaskConsumer.
+// Posts the event as JSON to POST /work/events on the manager.
+func (c *RESTConsumer) Emit(ctx context.Context, event models.TaskEvent) error
+</file>
+
+<file path="patterns/02-rest-polling/internal/rest/dispatcher.go">
+package rest
+import (
+	"context"
+	"net/http"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"net/http"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// RESTDispatcher implements contracts.TaskDispatcher.
+// Workers poll GET /work/next for tasks and post events via POST /work/events.
+type RESTDispatcher struct {
+	tasks  chan models.Task
+	events chan models.TaskEvent
+}
+// NewRESTDispatcher creates a RESTDispatcher with a buffered task queue.
+func NewRESTDispatcher(queueSize int) *RESTDispatcher
+// Start implements contracts.TaskDispatcher — no-op; no background initialisation needed.
+func (p *RESTDispatcher) Start(_ context.Context) error
+// Dispatch implements contracts.TaskDispatcher.
+// Non-blocking: returns ErrDispatchFull if the queue is at capacity.
+func (p *RESTDispatcher) Dispatch(_ context.Context, task models.Task) error
+// ReceiveEvent implements contracts.TaskDispatcher.
+// Blocks until an event arrives or ctx is cancelled.
+func (p *RESTDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+// HandleNext handles GET /work/next.
+// Returns 200+JSON if a task is queued, 204 if the queue is empty.
+func (p *RESTDispatcher) HandleNext(c echo.Context) error
+// HandleEvent handles POST /work/events.
+// Terminal events (completed/failed) are forwarded with a blocking send to
+// guarantee delivery; non-terminal events are best-effort.
+func (p *RESTDispatcher) HandleEvent(c echo.Context) error
+⋮----
+var ev models.TaskEvent
+⋮----
+default: // drop non-terminal events if buffer is full
+</file>
+
+<file path="patterns/03-websocket-hub/internal/websocket/consumer.go">
+package wsinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"math"
+	"sync"
+	"time"
+	"github.com/gorilla/websocket"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"math"
+"sync"
+"time"
+"github.com/gorilla/websocket"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskConsumer = (*WebSocketConsumer)(nil)
+// readyMsg is sent immediately after connecting to signal the worker is idle.
+type readyMsg struct {
+	Type string `json:"type"`
+}
+// WebSocketConsumer implements dispatch.TaskConsumer over a WebSocket connection
+// to the API. Connect starts the reconnect loop (non-blocking); Receive blocks
+// until a task arrives.
+type WebSocketConsumer struct {
+	apiURL      string
+	tasks       chan models.Task
+	mu          sync.Mutex
+	currentSend chan []byte // guarded by mu; nil when disconnected
+}
+⋮----
+currentSend chan []byte // guarded by mu; nil when disconnected
+⋮----
+// NewWebSocketConsumer creates a WebSocketConsumer that connects to the given URL.
+func NewWebSocketConsumer(apiURL string) *WebSocketConsumer
+// Connect starts the reconnect loop in a background goroutine (non-blocking).
+func (c *WebSocketConsumer) Connect(ctx context.Context) error
+func (c *WebSocketConsumer) reconnectLoop(ctx context.Context)
+// Receive blocks until a task is available or ctx is cancelled.
+func (c *WebSocketConsumer) Receive(ctx context.Context) (models.Task, error)
+// Emit sends a TaskEvent to the API over WebSocket.
+// Terminal task_status events use a blocking send to ensure delivery.
+// All other events are best-effort and may be dropped if the send buffer is full.
+func (c *WebSocketConsumer) Emit(_ context.Context, event models.TaskEvent) error
+⋮----
+send <- data // blocking: must not lose terminal status
+⋮----
+// runConn manages one connection lifecycle: write pump + read loop.
+func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error
+⋮----
+// Write pump — only goroutine that writes to conn.
+⋮----
+var msg taskMsg
+</file>
+
+<file path="patterns/03-websocket-hub/internal/websocket/dispatcher.go">
+package wsinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"sync"
+	"time"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"sync"
+"time"
+"github.com/google/uuid"
+"github.com/gorilla/websocket"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskDispatcher = (*WebSocketDispatcher)(nil)
+// msgTypeTask is sent from the API to a worker carrying the task to execute.
+const msgTypeTask = "task"
+// taskMsg wraps a Task for delivery to a worker over WebSocket.
+type taskMsg struct {
+	Type string      `json:"type"`
+	Task models.Task `json:"task"`
+}
+// workerConn represents a connected remote worker.
+type workerConn struct {
+	id   string
+	conn *websocket.Conn
+	send chan []byte
+	hub  *WebSocketDispatcher
+	busy bool
+}
+// WebSocketDispatcher manages connected remote workers and implements TaskDispatcher.
+// Workers connect via HTTP GET /ws/register; Register is called by that handler.
+type WebSocketDispatcher struct {
+	mu      sync.Mutex
+	workers []*workerConn
+	nextIdx int
+	events  chan models.TaskEvent
+}
+// NewWebSocketDispatcher creates a WebSocketDispatcher with a buffered event channel.
+func NewWebSocketDispatcher() *WebSocketDispatcher
+// Start is a no-op; subscriptions are established per-connection via Register.
+func (p *WebSocketDispatcher) Start(_ context.Context) error
+// Register adds a new worker connection and starts its read/write pumps.
+func (p *WebSocketDispatcher) Register(conn *websocket.Conn)
+// Dispatch sends the task to an idle worker using round-robin.
+// Returns ErrNoWorkers if all workers are busy or none are connected.
+func (p *WebSocketDispatcher) Dispatch(_ context.Context, task models.Task) error
+// ReceiveEvent blocks until an event is available or ctx is cancelled.
+func (p *WebSocketDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+func (p *WebSocketDispatcher) remove(wc *workerConn)
+// writePump is the only goroutine that writes to the WebSocket connection.
+func (wc *workerConn) writePump()
+// readPump processes TaskEvent messages from the worker.
+// Terminal task_status events mark the worker as idle and use a blocking send.
+// All other events are forwarded best-effort.
+func (wc *workerConn) readPump()
+⋮----
+var ev models.TaskEvent
+⋮----
+wc.hub.events <- ev // blocking: must not lose terminal status
+⋮----
+// Unknown types (e.g., "ready") are silently ignored.
+</file>
+
+<file path="patterns/04-queue-and-store/internal/nats/consumer.go">
+package natsinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"github.com/nats-io/nats.go"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"github.com/nats-io/nats.go"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskConsumer = (*NATSConsumer)(nil)
+// NATSConsumer implements TaskConsumer over NATS.
+// It receives tasks from JetStream (queue-subscribe with manual ACK for
+// at-least-once delivery) and emits all task events via NATS Core.
+// The worker loop is synchronous — one task at a time — preserving NATS
+// at-least-once delivery semantics.
+type NATSConsumer struct {
+	nc    *nats.Conn
+	js    nats.JetStreamContext
+	tasks chan models.Task
+}
+// NewNATSConsumer creates a NATSConsumer. Call Connect to start the subscription.
+func NewNATSConsumer(nc *nats.Conn, js nats.JetStreamContext) *NATSConsumer
+// Connect starts the JetStream queue subscription in a background goroutine (non-blocking).
+func (s *NATSConsumer) Connect(ctx context.Context) error
+func (s *NATSConsumer) subscribe(ctx context.Context)
+⋮----
+var task models.Task
+⋮----
+// Block until the main loop picks up the task, then ACK.
+// If the process crashes before Receive returns, NATS redelivers.
+⋮----
+// Receive blocks until a task is available or ctx is cancelled.
+func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error)
+// Emit publishes a TaskEvent to "task.events.<taskID>" via NATS Core.
+// All API replicas subscribe to this subject, ensuring every SSE hub receives the event.
+func (s *NATSConsumer) Emit(_ context.Context, event models.TaskEvent) error
+</file>
+
+<file path="patterns/04-queue-and-store/internal/nats/dispatcher.go">
+package natsinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"github.com/nats-io/nats.go"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"github.com/nats-io/nats.go"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskDispatcher = (*NATSDispatcher)(nil)
+// NATSDispatcher implements TaskDispatcher using NATS JetStream for dispatch and
+// NATS Core for receiving all task events from workers via a single subject.
+// Every API replica subscribes to task.events.*, so all SSE hubs receive
+// all events regardless of which replica the browser is connected to.
+type NATSDispatcher struct {
+	nc     *nats.Conn
+	js     nats.JetStreamContext
+	events chan models.TaskEvent
+}
+// NewNATSDispatcher creates a NATSDispatcher. Call Start to register NATS Core subscriptions.
+func NewNATSDispatcher(nc *nats.Conn, js nats.JetStreamContext) *NATSDispatcher
+// Start registers a single NATS Core subscription for all task events.
+// It is non-blocking; the subscription callback pushes events into the internal channel.
+func (b *NATSDispatcher) Start(_ context.Context) error
+⋮----
+var ev models.TaskEvent
+⋮----
+b.events <- ev // blocking: must not lose terminal status
+⋮----
+// Dispatch publishes the task to the "tasks.new" JetStream subject.
+func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error
+// ReceiveEvent blocks until an event is available or ctx is cancelled.
+func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+</file>
+
+<file path="patterns/04-queue-and-store/internal/nats/setup.go">
+package natsinternal
+import (
+	"log"
+	"github.com/nats-io/nats.go"
+)
+⋮----
+"log"
+"github.com/nats-io/nats.go"
+⋮----
+const (
+	StreamName  = "TASKS"
+	StreamSubj  = "tasks.>"
+	ConsumerDur = "workers"
+)
+// SetupJetStream idempotently creates the TASKS stream.
+// Safe to call from multiple services on startup.
+func SetupJetStream(js nats.JetStreamContext) error
+</file>
+
+<file path="patterns/04-queue-and-store/internal/postgres/store.go">
+package pgstore
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"fmt"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"work-distribution-patterns/shared/models"
+⋮----
+const schema = `
+CREATE TABLE IF NOT EXISTS tasks (
+	id            TEXT        PRIMARY KEY,
+	name          TEXT        NOT NULL,
+	status        TEXT        NOT NULL,
+	stages        JSONB       NOT NULL,
+	submitted_at  TIMESTAMPTZ NOT NULL,
+	dispatched_at TIMESTAMPTZ,
+	completed_at  TIMESTAMPTZ
+)`
+// Store implements store.TaskStore against PostgreSQL.
+type Store struct {
+	pool *pgxpool.Pool
+}
+// New creates a Store and runs the schema migration.
+func New(ctx context.Context, pool *pgxpool.Pool) (*Store, error)
+func (s *Store) Create(task models.Task) error
+func (s *Store) Get(id string) (models.Task, bool)
+func (s *Store) List() []models.Task
+⋮----
+var tasks []models.Task
+⋮----
+func (s *Store) SetStatus(id string, status models.TaskStatus) error
+⋮----
+var completedAt *time.Time
+⋮----
+func (s *Store) SetDispatchedAt(id string, t time.Time) error
+// scanner abstracts pgx.Row and pgx.Rows so scanTask works for both.
+type scanner interface {
+	Scan(dest ...any) error
+}
+func scanTask(s scanner) (models.Task, error)
+⋮----
+var t models.Task
+var status string
+var stagesJSON string
+</file>
+
+<file path="shared/sse/client.go">
+package sse
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"bufio"
+"context"
+"encoding/json"
+"fmt"
+"net/http"
+"strings"
+"time"
+"work-distribution-patterns/shared/models"
+⋮----
+// Client connects to a remote SSE endpoint and streams TaskEvents.
+// Used by P2/P3 API processes to subscribe to manager's event stream.
+type Client struct {
+	url        string
+	httpClient *http.Client
+}
+// NewClient creates an SSE client that connects to the given URL.
+func NewClient(url string) *Client
+⋮----
+Timeout: 0, // No timeout for SSE streaming
+⋮----
+// Subscribe connects to the SSE endpoint and returns a channel of events.
+// The connection is maintained until ctx is cancelled.
+// Automatically reconnects on disconnection with exponential backoff.
+func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+func (c *Client) streamWithReconnect(ctx context.Context, out chan<- models.TaskEvent)
+⋮----
+// Connection dropped, reconnect with backoff
+⋮----
+func (c *Client) streamEvents(ctx context.Context, out chan<- models.TaskEvent) error
+⋮----
+var ev models.TaskEvent
+⋮----
+continue // Skip malformed events
+</file>
+
+<file path="shared/templates/embed.go">
+package templates
+import "embed"
+//go:embed index.html
+var FS embed.FS
+</file>
+
+<file path="patterns/01-goroutine-pool/internal/goroutine/consumer.go">
+package goroutine
+import (
+	"context"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskConsumer = (*ChannelConsumer)(nil)
+// ChannelConsumer is the worker-side view of the in-process channel transport.
+// It reads tasks from the manager and writes all events back over a single channel.
+type ChannelConsumer struct {
+	tasks  <-chan models.Task      // read-only:  receive tasks from manager
+	events chan<- models.TaskEvent // write-only: emit events to manager
+}
+⋮----
+tasks  <-chan models.Task      // read-only:  receive tasks from manager
+events chan<- models.TaskEvent // write-only: emit events to manager
+⋮----
+// Connect is a no-op; channels are ready at construction time.
+func (c *ChannelConsumer) Connect(_ context.Context) error
+// Receive blocks until a task is available or ctx is cancelled.
+func (c *ChannelConsumer) Receive(ctx context.Context) (models.Task, error)
+// Emit sends a TaskEvent to the manager. Terminal task_status events use a
+// blocking send to guarantee delivery. All other events are best-effort and
+// may be dropped if the channel is full.
+func (c *ChannelConsumer) Emit(_ context.Context, event models.TaskEvent) error
+⋮----
+c.events <- event // blocking: must not lose terminal status
+⋮----
+default: // drop progress/running events if channel is full
+</file>
+
+<file path="patterns/02-rest-polling/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	restinternal "work-distribution-patterns/patterns/02-rest-polling/internal/rest"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"os/signal"
+"syscall"
+"time"
+"github.com/kelseyhightower/envconfig"
+restinternal "work-distribution-patterns/patterns/02-rest-polling/internal/rest"
+"work-distribution-patterns/shared/executor"
+⋮----
+type config struct {
+	ManagerURL       string `envconfig:"manager_url" default:"http://localhost:8081"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+</file>
+
+<file path="patterns/04-queue-and-store/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/nats-io/nats.go"
+	natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"os/signal"
+"syscall"
+"time"
+"github.com/kelseyhightower/envconfig"
+"github.com/nats-io/nats.go"
+natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
+"work-distribution-patterns/shared/executor"
+⋮----
+type config struct {
+	NATSURL          string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Synchronous: exec.Run completes before we receive the next task,
+// preserving NATS at-least-once delivery (ACK happens in Connect after
+// the task is delivered to Receive).
+</file>
+
+<file path="shared/events/memory.go">
+package events
+import (
+	"context"
+	"sync"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"sync"
+"work-distribution-patterns/shared/models"
+⋮----
+type MemoryEventBus struct {
+	mu   sync.RWMutex
+	live map[chan models.TaskEvent]struct{}
+func NewMemoryEventBus() *MemoryEventBus
+func (m *MemoryEventBus) Publish(event models.TaskEvent)
+⋮----
+// Notify all live subscribers
+⋮----
+// Drop slow consumers
+⋮----
+func (m *MemoryEventBus) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+</file>
+
+<file path="shared/events/nats.go">
+package events
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"work-distribution-patterns/shared/models"
+	"github.com/nats-io/nats.go"
+)
+⋮----
+"context"
+"encoding/json"
+"fmt"
+"work-distribution-patterns/shared/models"
+"github.com/nats-io/nats.go"
+⋮----
+type NATSEventBus struct {
+	nc *nats.Conn
+}
+func NewNATSEventBus(nc *nats.Conn) *NATSEventBus
+func (n *NATSEventBus) Publish(event models.TaskEvent)
+func (n *NATSEventBus) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+⋮----
+var ev models.TaskEvent
+</file>
+
+<file path="tests/load/load.go">
+// load is a configurable load test tool for the work-distribution-patterns API.
+// Run: go run ./tests/load/load.go -url http://localhost:8080
+package main
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log"
+	"math/rand"
+	"net/http"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+⋮----
+"encoding/json"
+"flag"
+"fmt"
+"log"
+"math/rand"
+"net/http"
+"strings"
+"sync"
+"sync/atomic"
+"time"
+⋮----
+type submitRequest struct {
+	Name       string `json:"name"`
+	StageCount int    `json:"stage_count"`
+}
+type submitResponse struct {
+	ID string `json:"id"`
+}
+type taskResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+func main()
+⋮----
+var (
+		submitted int64
+		failed    int64
+		completed int64
+		mu        sync.Mutex
+		taskIDs   []string
+	)
+// Submission loop
+⋮----
+var sr submitResponse
+⋮----
+// Wait up to 120s for tasks to complete (server configures stage duration)
+⋮----
+var tr taskResponse
+</file>
+
+<file path="patterns/01-goroutine-pool/internal/worker/worker.go">
+package worker
+import (
+	"context"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/executor"
+⋮----
+// RunWorker loops indefinitely, pulling tasks from consumer and executing them.
+// The executor emits all status and progress events via consumer (TaskConsumer).
+// Each call to RunWorker should run in its own goroutine.
+func RunWorker(ctx context.Context, consumer contracts.TaskConsumer, exec *executor.Executor)
+</file>
+
+<file path="patterns/02-rest-polling/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	restinternal "work-distribution-patterns/patterns/02-rest-polling/internal/rest"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+restinternal "work-distribution-patterns/patterns/02-rest-polling/internal/rest"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr             string `envconfig:"addr" default:":8081"`
+	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Pump manager events into SSE hub for API processes to subscribe
+⋮----
+// Build the router manually to avoid the route collision on POST /tasks
+// that api.NewRouter would cause — the manager needs a custom handler that
+// accepts a fully-formed Task (not the {name, stage_count} submit request).
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+// The API already called models.NewTask(...); we must not create a new UUID.
+⋮----
+var task models.Task
+⋮----
+// Worker polling endpoints.
+</file>
+
+<file path="patterns/03-websocket-hub/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"github.com/gorilla/websocket"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"github.com/gorilla/websocket"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr             string `envconfig:"addr" default:":8081"`
+	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
+}
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Pump manager events into SSE hub for API processes to subscribe
+⋮----
+// Build the router manually — the manager accepts a fully-formed Task
+// (pre-created by the API with models.NewTask) rather than a submit request.
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+⋮----
+var task models.Task
+⋮----
+// Worker WebSocket registration — workers connect here to receive tasks.
+</file>
+
+<file path="patterns/03-websocket-hub/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"os/signal"
+"syscall"
+"time"
+"github.com/kelseyhightower/envconfig"
+wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
+"work-distribution-patterns/shared/executor"
+⋮----
+type config struct {
+	ManagerURL       string `envconfig:"manager_url" default:"ws://localhost:8081/ws/register"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+</file>
+
+<file path="patterns/04-queue-and-store/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go"
+	natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
+	pgstore "work-distribution-patterns/patterns/04-queue-and-store/internal/postgres"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"github.com/nats-io/nats.go"
+natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
+pgstore "work-distribution-patterns/patterns/04-queue-and-store/internal/postgres"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Build the router manually — the manager accepts a fully-formed Task
+// (pre-created by the API with models.NewTask) rather than a submit request.
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+⋮----
+var task models.Task
+</file>
+
+<file path="shared/contracts/consumer.go">
+package contracts
+import (
+	"context"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"work-distribution-patterns/shared/models"
+⋮----
+// TaskConsumer is the worker-side transport view.
+// Connect establishes the transport; Receive blocks for the next task;
+// Emit sends a TaskEvent back to the manager (progress or status).
+type TaskConsumer interface {
+	Connect(ctx context.Context) error
+	Receive(ctx context.Context) (models.Task, error)
+	Emit(ctx context.Context, event models.TaskEvent) error
+}
+</file>
+
+<file path="shared/contracts/producer.go">
+package contracts
+import (
+	"context"
+	"errors"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"errors"
+"work-distribution-patterns/shared/models"
+⋮----
+// TaskDispatcher is the manager-side view of the execution substrate.
+// Start sets up any transport subscriptions (non-blocking).
+// Dispatch enqueues a task for a worker to process.
+// ReceiveEvent blocks until an event arrives or ctx is cancelled.
+type TaskDispatcher interface {
+	Start(ctx context.Context) error
+	Dispatch(ctx context.Context, task models.Task) error
+	ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+}
+// Sentinel errors returned by Dispatch; Manager maps these to HTTP status codes.
+var (
+	ErrDispatchFull = errors.New("dispatch queue full")  // → 429
+⋮----
+ErrDispatchFull = errors.New("dispatch queue full")  // → 429
+ErrNoWorkers    = errors.New("no workers available") // → 503
+</file>
+
+<file path="shared/events/events.go">
+package events
+import (
+	"context"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"work-distribution-patterns/shared/models"
+⋮----
+// TaskEventBus is the abstraction for publishing and receiving task events.
+// All implementations use native pub/sub (channels, SSE, NATS) - no polling.
+type TaskEventBus interface {
+	// Publish broadcasts an event to all subscribers.
+	Publish(event models.TaskEvent)
+	// Subscribe returns a channel that receives live events.
+	// The channel is closed when ctx is cancelled.
+	Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+}
+⋮----
+// Publish broadcasts an event to all subscribers.
+⋮----
+// Subscribe returns a channel that receives live events.
+// The channel is closed when ctx is cancelled.
+</file>
+
+<file path="shared/store/store.go">
+package store
+import (
+	"time"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"time"
+"work-distribution-patterns/shared/models"
+⋮----
+// TaskStore is the persistence interface for tasks.
+type TaskStore interface {
+	Create(task models.Task) error
+	Get(id string) (models.Task, bool)
+	List() []models.Task
+	SetStatus(id string, status models.TaskStatus) error
+	SetDispatchedAt(id string, t time.Time) error
+}
+</file>
+
+<file path="shared/client/manager.go">
+package client
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"bytes"
+"context"
+"encoding/json"
+"fmt"
+"net/http"
+"time"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/shared/models"
+⋮----
+// RemoteTaskManager implements contracts.TaskManager by proxying Submit/Get/List
+// to the manager process over HTTP. Used by API processes in Patterns 2, 3, and 4.
+//
+// Events are handled separately — each pattern's API subscribes to events using
+// its native transport (SSE for P2/P3, NATS for P4).
+type RemoteTaskManager struct {
+	baseURL    string
+	httpClient *http.Client
+}
+// NewTaskManager creates a client connected to a Manager process.
+func NewTaskManager(baseURL string) *RemoteTaskManager
+// Submit sends a fully-formed Task to POST /tasks on the manager.
+// Maps 429 and 503 responses to the corresponding echo HTTP errors.
+func (m *RemoteTaskManager) Submit(ctx context.Context, task models.Task) error
+// Get fetches a single task from GET /tasks/:id on the manager.
+// Returns (Task{}, false) on 404 or any error.
+func (m *RemoteTaskManager) Get(ctx context.Context, id string) (models.Task, bool)
+⋮----
+var task models.Task
+⋮----
+// List fetches all tasks from GET /tasks on the manager.
+// Returns an empty slice on any error.
+func (m *RemoteTaskManager) List(ctx context.Context) []models.Task
+⋮----
+var tasks []models.Task
+</file>
+
+<file path="shared/contracts/manager.go">
+package contracts
+import (
+	"context"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"work-distribution-patterns/shared/models"
+⋮----
+// TaskManager is the single abstraction point between the HTTP layer and
+// whatever mechanism is used to execute tasks. All patterns implement this.
+//
+// TaskManager owns the full task lifecycle:
+//   - Persisting the task to the store before dispatching
+//   - Dispatching work to the execution substrate (pool, WebSocket, NATS, etc.)
+//   - Receiving progress reports from workers and routing them to the event bus
+//   - Persisting the final terminal status (completed/failed) to the store
+⋮----
+// Workers report progress via the TaskConsumer they are given — they have no
+// knowledge of stores, event buses, or browsers.
+⋮----
+// Event streaming is handled separately — each pattern wires events in main.go
+// using its native transport (channels, SSE, NATS).
+type TaskManager interface {
+	Submit(ctx context.Context, task models.Task) error
+	Get(ctx context.Context, id string) (models.Task, bool)
+	List(ctx context.Context) []models.Task
+}
+</file>
+
+<file path="shared/sse/hub.go">
+package sse
+import (
+	"encoding/json"
+	"sync"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"encoding/json"
+"sync"
+"work-distribution-patterns/shared/models"
+⋮----
+// Hub manages SSE subscribers and broadcasts events to task-scoped or global subscribers.
+type Hub struct {
+	mu         sync.Mutex
+	taskSubs   map[string]map[chan []byte]struct{} // taskID → subscribers
+⋮----
+taskSubs   map[string]map[chan []byte]struct{} // taskID → subscribers
+globalSubs map[chan []byte]struct{}            // taskID="" → all events
+⋮----
+func NewHub() *Hub
+// Subscribe returns a buffered channel that receives SSE event bytes and an
+// unsubscribe function. The caller must call unsubscribe when done.
+// If taskID is empty, the subscriber receives all events (global subscription).
+// Otherwise, the subscriber only receives events for the specified task.
+func (h *Hub) Subscribe(taskID string) (chan []byte, func())
+⋮----
+delete(h.taskSubs, taskID) // reclaim map entry
+⋮----
+// Publish broadcasts a TaskEvent to task-scoped and global subscribers.
+func (h *Hub) Publish(event models.TaskEvent)
+func (h *Hub) broadcast(taskID string, data []byte)
+⋮----
+for ch := range h.taskSubs[taskID] { // range over nil map is safe in Go
+⋮----
+default: // drop slow consumer
+</file>
+
+<file path="shared/store/memory.go">
+package store
+import (
+	"fmt"
+	"sync"
+	"time"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"fmt"
+"sync"
+"time"
+"work-distribution-patterns/shared/models"
+⋮----
+// MemoryStore is a thread-safe in-memory TaskStore used by Pattern 1 and 2.
+type MemoryStore struct {
+	mu    sync.RWMutex
+	tasks map[string]*models.Task
+}
+func NewMemoryStore() *MemoryStore
+func (s *MemoryStore) Create(task models.Task) error
+func (s *MemoryStore) Get(id string) (models.Task, bool)
+func (s *MemoryStore) List() []models.Task
+func (s *MemoryStore) SetStatus(id string, status models.TaskStatus) error
+func (s *MemoryStore) SetDispatchedAt(id string, t time.Time) error
+</file>
+
+<file path="patterns/02-rest-polling/cmd/api/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Pump manager's SSE stream into the local hub so browser clients connected
+// to this API process receive real-time progress updates.
+</file>
+
+<file path="patterns/03-websocket-hub/cmd/api/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Pump manager's SSE stream into the local hub so browser clients connected
+// to this API process receive real-time progress updates.
+</file>
+
+<file path="patterns/04-queue-and-store/cmd/api/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/nats-io/nats.go"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"github.com/kelseyhightower/envconfig"
+"github.com/nats-io/nats.go"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Subscribe directly to NATS for events (distributed pub/sub).
+</file>
+
+<file path="tests/e2e/helpers_test.go">
+package e2e_test
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"testing"
+)
+⋮----
+"bufio"
+"context"
+"encoding/json"
+"fmt"
+"net/http"
+"os"
+"strings"
+"testing"
+⋮----
+// baseURL returns the target API base URL (default: http://localhost:8080).
+func baseURL() string
+// submitRequest is the POST /tasks body.
+type submitRequest struct {
+	Name       string `json:"name"`
+	StageCount int    `json:"stage_count"`
+}
+// submitResponse is the 202 response from POST /tasks.
+type submitResponse struct {
+	ID string `json:"id"`
+}
+// taskResponse mirrors models.Task for JSON decoding.
+type taskResponse struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Status string          `json:"status"`
+	Stages []stageResponse `json:"stages"`
+}
+type stageResponse struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+}
+// SSEEvent represents a parsed server-sent event.
+type SSEEvent struct {
+	Type      string `json:"type"`
+	TaskID    string `json:"taskID"`
+	StageName string `json:"stageName"`
+	Progress  int    `json:"progress"`
+	Status    string `json:"status"`
+}
+// SSEClient connects to the /events endpoint and emits parsed events on a channel.
+// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
+// If taskID is empty, connects to /events for global delivery (all tasks).
+// Returns when ctx is cancelled or the connection drops.
+func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent
+⋮----
+resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
+⋮----
+var ev SSEEvent
+⋮----
+// postTask submits a task and returns its ID.
+func postTask(t *testing.T, name string, stageCount int) string
+⋮----
+var sr submitResponse
+⋮----
+// listTasks fetches all tasks from GET /tasks.
+func listTasks(t *testing.T) []taskResponse
+⋮----
+var tasks []taskResponse
+⋮----
+// getTask fetches a task by ID.
+func getTask(t *testing.T, id string) taskResponse
+⋮----
+var tr taskResponse
+</file>
+
+<file path="shared/models/task.go">
+package models
+import (
+	"fmt"
+	"time"
+	"github.com/google/uuid"
+)
+⋮----
+"fmt"
+"time"
+"github.com/google/uuid"
+⋮----
+var stageNames = []string{
+	"Initialization", "Validation", "Processing", "Transformation",
+	"Aggregation", "Optimization", "Finalization", "Cleanup",
+}
+// NewTask constructs a Task with a generated ID, named stages, and pending status.
+// stageCount is clamped to [1, 8].
+func NewTask(name string, stageCount int) Task
+type TaskStatus string
+const (
+	TaskPending   TaskStatus = "pending"
+	TaskRunning   TaskStatus = "running"
+	TaskCompleted TaskStatus = "completed"
+	TaskFailed    TaskStatus = "failed"
+)
+// TaskEvent is the single ordered event type flowing from worker to manager.
+// Type is either EventProgress or EventTaskStatus.
+//
+//   - EventProgress events carry StageName and Progress; they are ephemeral
+//     (forwarded to SSE clients only, never persisted to the store).
+//   - EventTaskStatus events carry Status; terminal statuses (completed/failed)
+//     are persisted; "running" is forwarded only.
+const (
+	EventProgress   = "progress"
+	EventTaskStatus = "task_status"
+)
+type TaskEvent struct {
+	Type      string `json:"type"`
+	TaskID    string `json:"taskID"`
+	StageName string `json:"stageName,omitempty"` // EventProgress only
+	Progress  int    `json:"progress,omitempty"`  // 0–100, EventProgress only
+	Status    string `json:"status,omitempty"`    // EventTaskStatus only
+}
+⋮----
+StageName string `json:"stageName,omitempty"` // EventProgress only
+Progress  int    `json:"progress,omitempty"`  // 0–100, EventProgress only
+Status    string `json:"status,omitempty"`    // EventTaskStatus only
+⋮----
+type Task struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Status       TaskStatus `json:"status"`
+	SubmittedAt  time.Time  `json:"submittedAt"`
+	DispatchedAt *time.Time `json:"dispatchedAt,omitempty"`
+	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+	Stages       []Stage    `json:"stages"`
+}
+// Stage records the name and index of a task stage.
+// Progress is tracked ephemerally via TaskEvent; it is not persisted.
+type Stage struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+}
+</file>
+
+<file path="tests/e2e/task_test.go">
+package e2e_test
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+)
+⋮----
+"context"
+"sync"
+"testing"
+"time"
+⋮----
+// TestSingleTask verifies a 3-stage task emits progress events and reaches completed.
+func TestSingleTask(t *testing.T)
+// TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
+func TestConcurrentTasks(t *testing.T)
+⋮----
+const numTasks = 3
+⋮----
+// Submit all tasks first, then open per-task SSE connections.
+⋮----
+// Fan-in all per-task SSE streams into a single merged channel.
+⋮----
+var wg sync.WaitGroup
+⋮----
+var mu sync.Mutex
+⋮----
+// TestStatusTransitions verifies the task goes through pending → running → completed.
+func TestStatusTransitions(t *testing.T)
+⋮----
+// Immediately check pending (task may have been picked up already)
+⋮----
+// running is SSE-only (UI signal); skip store check to avoid the
+// race where the event fires before the client connects.
+⋮----
+var found *taskResponse
+</file>
+
+<file path="shared/api/server.go">
+package api
+import (
+	"html/template"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/sse"
+)
+⋮----
+"html/template"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/sse"
+⋮----
+// NewRouter creates and configures the Echo router with all routes.
+func NewRouter(
+	hub *sse.Hub,
+	tpl *template.Template,
+	manager contracts.TaskManager,
+) *echo.Echo
+⋮----
+// Logger skips /health so frequent health-check polls don't flood the log.
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
+⋮----
+// Attach template to context for HTMX fragment rendering
+</file>
+
+<file path="shared/manager/manager.go">
+package manager
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+	"github.com/labstack/echo/v4"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/store"
+)
+⋮----
+"context"
+"errors"
+"net/http"
+"time"
+"github.com/labstack/echo/v4"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/store"
+⋮----
+// Compile-time check that Manager implements dispatch.TaskManager.
+var _ dispatch.TaskManager = (*Manager)(nil)
+// Manager is the unified task lifecycle owner.
+// It persists tasks, dispatches them via TaskDispatcher, routes events from the dispatcher
+// to the store and event bus, and optionally re-dispatches stalled tasks.
+type Manager struct {
+	store      store.TaskStore
+	dispatcher dispatch.TaskDispatcher
+	events     events.TaskEventBus
+	deadline   time.Duration
+}
+// New creates a Manager.
+// deadline controls re-dispatch: 0 disables the deadline loop entirely.
+func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration) *Manager
+// Submit persists the task then dispatches it via the dispatcher.
+// Maps dispatcher sentinel errors to appropriate HTTP status codes.
+// On any dispatch error, marks the task failed in the store.
+func (m *Manager) Submit(ctx context.Context, task models.Task) error
+// Get returns the task with the given id from the store.
+func (m *Manager) Get(_ context.Context, id string) (models.Task, bool)
+// List returns all tasks from the store.
+func (m *Manager) List(_ context.Context) []models.Task
+// Start initialises the dispatcher then launches the event and deadline goroutines.
+// It is non-blocking; call it once before serving requests.
+func (m *Manager) Start(ctx context.Context)
+// runEventLoop consumes all TaskEvents from the dispatcher in a single goroutine,
+// guaranteeing that progress and status events are processed in the order
+// they were emitted. Terminal statuses are persisted; all events are forwarded
+// to the SSE hub.
+func (m *Manager) runEventLoop(ctx context.Context)
+// runDeadlineLoop ticks at deadline/2 and re-dispatches tasks whose last
+// dispatch time is older than the deadline. Exits immediately if deadline == 0.
+func (m *Manager) runDeadlineLoop(ctx context.Context)
+</file>
+
+<file path="shared/executor/executor.go">
+package executor
+import (
+	"context"
+	"math/rand"
+	"time"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"math/rand"
+"time"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Executor runs a task's stages sequentially, emitting progress events.
+// MaxStageDuration is set once at construction from server config (MAX_STAGE_DURATION).
+// Each stage picks a random duration in [0, MaxStageDuration].
+type Executor struct {
+	MaxStageDuration time.Duration
+}
+// Run executes all stages of the task sequentially, emitting a task_status=running
+// event at start, a progress event when each stage starts and completes, and a
+// terminal task_status=completed or task_status=failed event on exit.
+// Context cancellation is detected during each stage's sleep and immediately
+// emits a failed status before returning.
+func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts.TaskConsumer)
+⋮----
+var stageDuration time.Duration
+</file>
+
+<file path="patterns/01-goroutine-pool/cmd/server/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/01-goroutine-pool/internal/goroutine"
+	"work-distribution-patterns/patterns/01-goroutine-pool/internal/worker"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"time"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/01-goroutine-pool/internal/goroutine"
+"work-distribution-patterns/patterns/01-goroutine-pool/internal/worker"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/executor"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr             string `envconfig:"addr" default:":8080"`
+	Workers          int    `envconfig:"workers" default:"5"`
+	QueueSize        int    `envconfig:"queue_size" default:"20"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+mgr := manager.New(taskStore, dispatcher, bus, 0) // deadline=0 disables re-dispatch
+⋮----
+// Pump events from the bus into the local hub for the browser
+</file>
+
+<file path="shared/api/handlers.go">
+package api
+import (
+	"fmt"
+	"html/template"
+	"net/http"
+	"time"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+)
+⋮----
+"fmt"
+"html/template"
+"net/http"
+"time"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+⋮----
+type submitRequest struct {
+	Name       string `json:"name"        form:"name"`
+	StageCount int    `json:"stage_count" form:"stage_count"`
+}
+// SubmitTask handles POST /tasks.
+// The task manager is responsible for persisting the task and dispatching it.
+func SubmitTask(manager contracts.TaskManager) echo.HandlerFunc
+⋮----
+var req submitRequest
+⋮----
+// Return HTML fragment for HTMX requests; JSON for everything else.
+⋮----
+// ListTasks handles GET /tasks.
+func ListTasks(manager contracts.TaskManager) echo.HandlerFunc
+// GetTask handles GET /tasks/:id.
+func GetTask(manager contracts.TaskManager) echo.HandlerFunc
+// SSEStream handles GET /events — streams SSE events to the client.
+func SSEStream(hub *sse.Hub) echo.HandlerFunc
+⋮----
+// Send a comment to flush headers immediately
+⋮----
+// Heartbeat to keep connection alive
+⋮----
+// Index handles GET / — serves the HTMX frontend.
+func Index(tpl *template.Template) echo.HandlerFunc
+// Health handles GET /health — used by Docker health checks.
+// Registered before the logger middleware so health poll traffic is not logged.
+func Health() echo.HandlerFunc
+</file>
+
+</files>
