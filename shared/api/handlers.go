@@ -115,7 +115,11 @@ func PollEvents(bus events.TaskEventBus) echo.HandlerFunc {
 		afterIDStr := c.QueryParam("afterID")
 		var afterID int64
 		if afterIDStr != "" {
-			afterID, _ = strconv.ParseInt(afterIDStr, 10, 64)
+			var err error
+			afterID, err = strconv.ParseInt(afterIDStr, 10, 64)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid afterID")
+			}
 		}
 
 		evs, err := bus.Poll(c.Request().Context(), afterID)

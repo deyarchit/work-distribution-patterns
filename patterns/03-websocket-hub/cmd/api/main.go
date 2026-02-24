@@ -9,6 +9,7 @@ import (
 
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
@@ -26,7 +27,8 @@ func main() {
 
 	ctx := context.Background()
 
-	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL, nil)
+	bus := events.NewPollingEventBus(cfg.ManagerURL)
+	taskManager := client.NewTaskManager(cfg.ManagerURL, bus)
 	hub := sse.NewHub()
 
 	// Pump manager SSE events into the local hub so browser clients connected

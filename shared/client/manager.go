@@ -22,9 +22,9 @@ type RemoteTaskManager struct {
 	bus        events.TaskEventBus
 }
 
-// NewRemoteTaskManager creates a client connected to a Manager API process.
-// If bus is provided, Subscribe uses it directly (e.g., NATS). Otherwise, it falls back to HTTP polling.
-func NewRemoteTaskManager(baseURL string, bus events.TaskEventBus) *RemoteTaskManager {
+// NewTaskManager creates a client connected to a Manager API process.
+// It uses the provided bus for subscriptions (e.g. NATS or Polling).
+func NewTaskManager(baseURL string, bus events.TaskEventBus) *RemoteTaskManager {
 	return &RemoteTaskManager{
 		baseURL:    baseURL,
 		httpClient: &http.Client{Timeout: 5 * time.Second},
@@ -118,76 +118,10 @@ func (m *RemoteTaskManager) List(ctx context.Context) []models.Task {
 	return tasks
 }
 
-// Subscribe polls GET /events/poll on the manager and forwards
-// all TaskEvents to the returned channel. The goroutine reconnects on failure
-// with a 2 s backoff and closes the channel when ctx is cancelled.
-// If a bus was provided during creation, it calls Subscribe on the bus directly.
+// Subscribe delegates subscription to the underlying event bus.
 func (m *RemoteTaskManager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
-	if m.bus != nil {
-		return m.bus.Subscribe(ctx)
+	if m.bus == nil {
+		return nil, fmt.Errorf("no event bus configured")
 	}
-	out := make(chan models.TaskEvent, 64)
-	go m.pollLoop(ctx, out)
-	return out, nil
-}
-
-func (m *RemoteTaskManager) pollLoop(ctx context.Context, out chan<- models.TaskEvent) {
-	defer close(out)
-
-	var lastID int64
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		url := fmt.Sprintf("%s/events/poll?afterID=%d", m.baseURL, lastID)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return
-		}
-
-		resp, err := m.httpClient.Do(req)
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(2 * time.Second):
-			}
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(2 * time.Second):
-			}
-			continue
-		}
-
-		var evs []events.StoredEvent
-		err = json.NewDecoder(resp.Body).Decode(&evs)
-		_ = resp.Body.Close()
-
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(2 * time.Second):
-			}
-			continue
-		}
-
-		for _, e := range evs {
-			select {
-			case out <- e.Event:
-				if e.ID > lastID {
-					lastID = e.ID
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
+	return m.bus.Subscribe(ctx)
 }
