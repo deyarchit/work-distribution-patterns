@@ -109,7 +109,6 @@ func main() {
 
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
-	e.GET("/events/poll", api.PollEvents(mgr.Events()))
 
 	log.Printf("Pattern 4 (Queue-and-Store) Manager listening on %s", cfg.Addr)
 	log.Fatal(e.Start(cfg.Addr))

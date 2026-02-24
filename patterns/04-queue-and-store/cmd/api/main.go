@@ -35,12 +35,12 @@ func main() {
 	}
 	defer nc.Close()
 
-	bus := events.NewNATSEventBus(nc)
-	taskManager := client.NewTaskManager(cfg.ManagerURL, bus)
+	taskManager := client.NewTaskManager(cfg.ManagerURL)
 	hub := sse.NewHub()
 
-	// Use the task manager to subscribe to events (agnostic of transport).
-	ch, _ := taskManager.Subscribe(ctx)
+	// Subscribe directly to NATS for events (distributed pub/sub).
+	bus := events.NewNATSEventBus(nc)
+	ch, _ := bus.Subscribe(ctx)
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

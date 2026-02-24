@@ -51,9 +51,3 @@ func (n *NATSEventBus) Subscribe(ctx context.Context) (<-chan models.TaskEvent, 
 
 	return ch, nil
 }
-
-func (n *NATSEventBus) Poll(ctx context.Context, afterID int64) ([]StoredEvent, error) {
-	// NATS implementation of Poll is not needed if the API subscribes directly.
-	// But to satisfy the interface, we can return an error or empty.
-	return nil, fmt.Errorf("polling not supported for NATS event bus")
-}

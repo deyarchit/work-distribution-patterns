@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 
-	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/models"
 )
 
@@ -13,15 +12,16 @@ import (
 // TaskManager owns the full task lifecycle:
 //   - Persisting the task to the store before dispatching
 //   - Dispatching work to the execution substrate (pool, WebSocket, NATS, etc.)
-//   - Receiving progress reports from workers and routing them to the SSE hub
+//   - Receiving progress reports from workers and routing them to the event bus
 //   - Persisting the final terminal status (completed/failed) to the store
 //
 // Workers report progress via the TaskConsumer they are given — they have no
-// knowledge of stores, SSE, or browsers.
+// knowledge of stores, event buses, or browsers.
+//
+// Event streaming is handled separately — each pattern wires events in main.go
+// using its native transport (channels, SSE, NATS).
 type TaskManager interface {
 	Submit(ctx context.Context, task models.Task) error
 	Get(ctx context.Context, id string) (models.Task, bool)
 	List(ctx context.Context) []models.Task
-	Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
-	Events() events.TaskEventBus
 }

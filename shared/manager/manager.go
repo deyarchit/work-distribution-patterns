@@ -38,11 +38,6 @@ func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, 
 	}
 }
 
-// Events returns the event bus.
-func (m *Manager) Events() events.TaskEventBus {
-	return m.events
-}
-
 // Submit persists the task then dispatches it via the dispatcher.
 // Maps dispatcher sentinel errors to appropriate HTTP status codes.
 // On any dispatch error, marks the task failed in the store.
@@ -81,11 +76,6 @@ func (m *Manager) List(_ context.Context) []models.Task {
 		return []models.Task{}
 	}
 	return tasks
-}
-
-// Subscribe returns a channel that receives all TaskEvents.
-func (m *Manager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
-	return m.events.Subscribe(ctx)
 }
 
 // Start initialises the dispatcher then launches the event and deadline goroutines.

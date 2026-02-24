@@ -9,7 +9,6 @@ import (
 
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/client"
-	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
@@ -27,13 +26,13 @@ func main() {
 
 	ctx := context.Background()
 
-	bus := events.NewPollingEventBus(cfg.ManagerURL)
-	taskManager := client.NewTaskManager(cfg.ManagerURL, bus)
+	taskManager := client.NewTaskManager(cfg.ManagerURL)
 	hub := sse.NewHub()
 
-	// Pump manager SSE events into the local hub so browser clients connected
+	// Pump manager's SSE stream into the local hub so browser clients connected
 	// to this API process receive real-time progress updates.
-	ch, _ := taskManager.Subscribe(ctx)
+	sseClient := sse.NewClient(cfg.ManagerURL + "/events")
+	ch, _ := sseClient.Subscribe(ctx)
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

@@ -5,21 +5,13 @@ import (
 	"work-distribution-patterns/shared/models"
 )
 
-// StoredEvent wraps a TaskEvent with an incremental sequence ID for polling.
-type StoredEvent struct {
-	ID    int64            `json:"id"`
-	Event models.TaskEvent `json:"event"`
-}
-
 // TaskEventBus is the abstraction for publishing and receiving task events.
+// All implementations use native pub/sub (channels, SSE, NATS) - no polling.
 type TaskEventBus interface {
-	// Publish broadcasts an event.
+	// Publish broadcasts an event to all subscribers.
 	Publish(event models.TaskEvent)
 
-	// Subscribe returns a channel for live events. Used by Pattern 1 and SSE streaming.
+	// Subscribe returns a channel that receives live events.
+	// The channel is closed when ctx is cancelled.
 	Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
-
-	// Poll returns events after the given ID. If none are available, it waits
-	// until ctx is cancelled or a new event arrives. Used by /events/poll endpoint.
-	Poll(ctx context.Context, afterID int64) ([]StoredEvent, error)
 }

@@ -10,31 +10,25 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/models"
 )
 
-// RemoteTaskManager implements contracts.TaskManager by proxying all calls
-// to the manager process over HTTP. Used by the API process in Patterns 2, 3, and 4.
+// RemoteTaskManager implements contracts.TaskManager by proxying Submit/Get/List
+// to the manager process over HTTP. Used by API processes in Patterns 2, 3, and 4.
+//
+// Events are handled separately — each pattern's API subscribes to events using
+// its native transport (SSE for P2/P3, NATS for P4).
 type RemoteTaskManager struct {
 	baseURL    string
 	httpClient *http.Client
-	bus        events.TaskEventBus
 }
 
-// NewTaskManager creates a client connected to a Manager API process.
-// It uses the provided bus for subscriptions (e.g. NATS or Polling).
-func NewTaskManager(baseURL string, bus events.TaskEventBus) *RemoteTaskManager {
+// NewTaskManager creates a client connected to a Manager process.
+func NewTaskManager(baseURL string) *RemoteTaskManager {
 	return &RemoteTaskManager{
 		baseURL:    baseURL,
 		httpClient: &http.Client{Timeout: 5 * time.Second},
-		bus:        bus,
 	}
-}
-
-// Events returns the underlying event bus if one is configured.
-func (m *RemoteTaskManager) Events() events.TaskEventBus {
-	return m.bus
 }
 
 // Submit sends a fully-formed Task to POST /tasks on the manager.
@@ -116,12 +110,4 @@ func (m *RemoteTaskManager) List(ctx context.Context) []models.Task {
 		return []models.Task{}
 	}
 	return tasks
-}
-
-// Subscribe delegates subscription to the underlying event bus.
-func (m *RemoteTaskManager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
-	if m.bus == nil {
-		return nil, fmt.Errorf("no event bus configured")
-	}
-	return m.bus.Subscribe(ctx)
 }

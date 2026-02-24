@@ -43,8 +43,8 @@ func main() {
 	mgr := manager.New(taskStore, dispatcher, bus, 0) // deadline=0 disables re-dispatch
 	mgr.Start(ctx)
 
-	// Pump events from the manager into the local hub for the browser
-	ch, _ := mgr.Subscribe(ctx)
+	// Pump events from the bus into the local hub for the browser
+	ch, _ := bus.Subscribe(ctx)
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

@@ -4,13 +4,11 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"work-distribution-patterns/shared/contracts"
-	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
 )
@@ -106,28 +104,6 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 				c.Response().Flush()
 			}
 		}
-	}
-}
-
-// PollEvents handles GET /events/poll — used for long-polling events.
-func PollEvents(bus events.TaskEventBus) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		afterIDStr := c.QueryParam("afterID")
-		var afterID int64
-		if afterIDStr != "" {
-			var err error
-			afterID, err = strconv.ParseInt(afterIDStr, 10, 64)
-			if err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid afterID")
-			}
-		}
-
-		evs, err := bus.Poll(c.Request().Context(), afterID)
-		if err != nil {
-			return err
-		}
-
-		return c.JSON(http.StatusOK, evs)
 	}
 }
 
