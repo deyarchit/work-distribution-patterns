@@ -1,5 +1,17 @@
 # Codemap Rationale Log
 
+## 420cf39 — 2026-02-23
+Commits: `0f2a79b..420cf39` (Remove polling; extract event bus abstraction)
+
+### Decisions
+- **Remove `TaskManager.Subscribe()` and extract `events.TaskEventBus`**: Previously, `TaskManager` owned event subscription — remote APIs called `RemoteTaskManager.Subscribe()` which internally used SSE polling. This mixed task management with event transport. The new `TaskEventBus` interface (Publish/Subscribe) provides clean separation: managers publish to the bus, wiring in `main.go` pumps bus → SSE hub, APIs subscribe via transport-specific clients (`sse.Client` for P2/P3, NATS for P4).
+
+- **`shared/sse/client.go` replaces `RemoteTaskManager.Subscribe`**: P2/P3 APIs now use `sse.Client` to subscribe to manager's SSE endpoint. Reconnection logic (exponential backoff) is centralized in `Client.streamWithReconnect`, removing duplicated SSE parsing from `RemoteTaskManager`.
+
+- **Pattern-specific event wiring in `main.go`**: P1–P3 use `MemoryEventBus` + SSE; P4 uses `NATSEventBus` + direct NATS subscription in API replicas. Event flow is now explicit and visible at startup, not buried in cross-process HTTP calls.
+
+- **P4 API requires `NATS_URL`**: APIs subscribe directly to NATS `task.events.*` instead of polling manager's SSE endpoint, eliminating the manager as event bottleneck and enabling true distributed pub/sub.
+
 ## 0f2a79c — 2026-02-23
 Commits: `0f2a79b..0f2a79c` (Rename TaskProducer → TaskDispatcher, update TaskConsumer terminology)
 

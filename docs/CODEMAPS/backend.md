@@ -1,4 +1,4 @@
-<!-- Commit: 0f2a79be70e27faae9a536f6a02ab610528f049f | Files scanned: 42 | Token estimate: ~840 -->
+<!-- Commit: 420cf39768fa36462d2c9db9a5c29f67dba10086 | Files scanned: 47 | Token estimate: ~890 -->
 
 # Backend Codemap
 
@@ -8,15 +8,16 @@
 |---------|------|------|
 | `shared/api` | `handlers.go`, `server.go` | HTTP routes (`/tasks`, `/events`, `/health`), HTMX handlers |
 | `shared/contracts` | `manager.go`, `dispatcher.go`, `consumer.go` | `TaskManager`, `TaskDispatcher`, `TaskConsumer` interfaces + sentinel errors |
-| `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, single `runEventLoop` routes events to store/hub |
+| `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, single `runEventLoop` routes events to store/event bus |
 | `shared/executor` | `executor.go` | Stage runner; emits all events (running/progress/terminal) via `contracts.TaskConsumer`; returns nothing |
 | `shared/models` | `task.go` | `Task`, `Stage`, `TaskEvent`, `TaskStatus`, event-type constants |
-| `shared/sse` | `hub.go` | SSE fan-out; `Publish(TaskEvent)` and `PublishTaskStatus` |
+| `shared/events` | `events.go`, `memory.go`, `nats.go` | `TaskEventBus` interface; `MemoryEventBus` (P1–P3), `NATSEventBus` (P4) |
+| `shared/sse` | `hub.go`, `client.go` | `Hub`: SSE fan-out; `Client`: SSE subscriber (used by P2/P3 APIs) |
 | `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
-| `p01/internal/goroutine` | `producer.go`, `consumer.go` | `ChannelDispatcher`+`ChannelConsumer` (single shared `events chan TaskEvent`); constructed together by `New` |
+| `p01/internal/goroutine` | `dispatcher.go`, `consumer.go` | `ChannelDispatcher`+`ChannelConsumer` (single shared `events chan TaskEvent`); constructed together by `New` |
 | `p01/internal/worker` | `worker.go` | `RunWorker`: `Receive` → `exec.Run(ctx, task, consumer)` loop |
-| `shared/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying HTTP calls to manager process; `sseLoop` goroutine for cross-process event subscription. Used by P2, P3, and P4 APIs. |
+| `shared/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying Submit/Get/List over HTTP. Used by P2, P3, and P4 APIs. |
 | `p02/internal/rest` (pkg `rest`) | `dispatcher.go`, `consumer.go` | `RESTDispatcher` (TaskDispatcher): buffered chan + HTTP handlers `/work/next`, `/work/events`; `RESTConsumer` (TaskConsumer): polling loop |
 | `p03/internal/websocket` (pkg `wsinternal`) | `dispatcher.go`, `consumer.go` | `WebSocketDispatcher` (TaskDispatcher): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
 | `p04/internal/nats` (pkg `natsinternal`) | `dispatcher.go`, `consumer.go`, `setup.go` | `NATSDispatcher`, `NATSConsumer`, JetStream stream setup |
@@ -44,7 +45,6 @@ type TaskManager interface {
     Submit(ctx context.Context, task models.Task) error
     Get(ctx context.Context, id string) (models.Task, bool)
     List(ctx context.Context) []models.Task
-    Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 }
 
 // contracts/dispatcher.go — manager-side transport view
@@ -63,6 +63,12 @@ type TaskConsumer interface {
     Emit(ctx context.Context, event models.TaskEvent) error
 }
 
+// events/events.go
+type TaskEventBus interface {
+    Publish(event models.TaskEvent)
+    Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+}
+
 // shared/api/server.go
 func NewRouter(hub *sse.Hub, tpl *template.Template, manager contracts.TaskManager) *echo.Echo
 
@@ -72,15 +78,17 @@ func (m *Manager) Start(ctx context.Context)   // non-blocking; launches runEven
 func (m *Manager) Submit(ctx context.Context, task models.Task) error
 func (m *Manager) Get(_ context.Context, id string) (models.Task, bool)
 func (m *Manager) List(_ context.Context) []models.Task
-func (m *Manager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+
+// sse/client.go
+func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)  // SSE streaming with auto-reconnect
 ```
 
 ## Pattern-Specific Notes
 
 **Pattern 1** — `ChannelDispatcher`+`ChannelConsumer` share a single `events chan TaskEvent` (created together by `New`). Directional channel types enforce ownership at compile time. `RunWorker` loops: `Receive` → `exec.Run(ctx, task, consumer)`; executor handles all event emission. Deadline disabled (`deadline=0`).
 
-**Pattern 2** — Three separate processes: API, Manager, Worker. `shared/client.RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP and `Subscribe` via SSE pump. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTDispatcher.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Deadline disabled.
+**Pattern 2** — Three separate processes: API, Manager, Worker. `shared/client.RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP. Manager creates `MemoryEventBus` and pumps it to SSE hub; API subscribes via `sse.Client`. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTDispatcher.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Deadline disabled.
 
-**Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher` and MemoryStore. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Deadline disabled.
+**Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher`, `MemoryEventBus`, and MemoryStore. Manager pumps `MemoryEventBus` to SSE hub; API subscribes via `sse.Client`. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Deadline disabled.
 
 **Pattern 4** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.

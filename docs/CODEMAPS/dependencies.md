@@ -1,4 +1,4 @@
-<!-- Commit: 0f2a79be70e27faae9a536f6a02ab610528f049f | Files scanned: 16 | Token estimate: ~640 -->
+<!-- Commit: 420cf39768fa36462d2c9db9a5c29f67dba10086 | Files scanned: 16 | Token estimate: ~650 -->
 
 # Dependencies & Configuration
 
@@ -26,7 +26,7 @@ All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `d
 | `MANAGER_URL` | `http://localhost:8081` | P2 API, P2 worker, P3 API, P4 API | Manager process base URL (HTTP for API; P2 worker also reads this) |
 | `WORKERS_QUEUE_SIZE` | `20` | P2 manager, P3 manager | Max queued tasks before HTTP 429 |
 | `MANAGER_URL` (WS) | `ws://localhost:8081/ws/register` | P3 worker | WebSocket registration endpoint on Manager |
-| `NATS_URL` | `nats://127.0.0.1:4222` | P4 manager | NATS server URL |
+| `NATS_URL` | `nats://127.0.0.1:4222` | P4 API, P4 manager | NATS server URL (API: event subscription; manager: dispatch + events) |
 | `DATABASE_URL` | `postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable` | P4 manager | PostgreSQL connection string |
 
 ## Container Topology
@@ -56,15 +56,15 @@ Workers connect to Manager (not API) via WebSocket.
 ### Pattern 4 — Docker Compose (`04-queue-and-store`)
 ```
 [nginx]        ← nginx/nginx.conf   (port 8080 → upstream api)
-  ├─ [api ×3] ← Dockerfile.api     (MANAGER_URL=http://manager:8081, depends_on manager healthy)
-[manager ×1]   ← Dockerfile.manager  (port 8081; owns NATS, postgres, SSE hub)
+  ├─ [api ×3] ← Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
+[manager ×1]   ← Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns NATSEventBus, postgres, SSE hub)
 [worker ×3]    ← Dockerfile.worker
 [nats]         ← nats:latest + nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
                ← named volume: nats-jetstream (persistent across restarts)
 [postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
 ```
-No sticky sessions: Manager subscribes to `task.events.*` on NATS Core and fans out to its hub; API replicas pump events from Manager's SSE endpoint into their local hubs.
-`pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
+No sticky sessions: API replicas subscribe directly to NATS `task.events.*` for distributed event streaming.
+Manager uses `NATSEventBus` to publish events; `pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
 **Note:** `nats.conf` is required — NATS 2.12+ defaults `Max Storage: 0 B` without explicit config.
 
 ## Build Targets
