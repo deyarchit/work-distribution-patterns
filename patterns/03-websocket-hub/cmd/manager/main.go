@@ -13,9 +13,9 @@ import (
 
 	wsinternal "work-distribution-patterns/patterns/03-websocket-hub/internal/websocket"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
 	"work-distribution-patterns/shared/templates"
 )
@@ -40,9 +40,9 @@ func main() {
 	ctx := context.Background()
 
 	taskStore := store.NewMemoryStore()
-	hub := sse.NewHub()
-	workerBus := wsinternal.NewWebSocketProducer()
-	mgr := manager.New(taskStore, workerBus, hub, 0)
+	bus := events.NewMemoryEventBus()
+	dispatcher := wsinternal.NewWebSocketDispatcher()
+	mgr := manager.New(taskStore, dispatcher, bus, 0)
 	mgr.Start(ctx)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
@@ -84,7 +84,7 @@ func main() {
 
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
-	e.GET("/events", api.SSEStream(hub))
+	e.GET("/events/poll", api.PollEvents(mgr.Events()))
 
 	// Worker WebSocket registration — workers connect here to receive tasks.
 	e.GET("/ws/register", func(c echo.Context) error {
@@ -92,7 +92,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		workerBus.Register(conn)
+		dispatcher.Register(conn)
 		return nil
 	})
 

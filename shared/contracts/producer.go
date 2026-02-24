@@ -7,11 +7,11 @@ import (
 	"work-distribution-patterns/shared/models"
 )
 
-// TaskProducer is the manager-side view of the execution substrate.
+// TaskDispatcher is the manager-side view of the execution substrate.
 // Start sets up any transport subscriptions (non-blocking).
 // Dispatch enqueues a task for a worker to process.
 // ReceiveEvent blocks until an event arrives or ctx is cancelled.
-type TaskProducer interface {
+type TaskDispatcher interface {
 	Start(ctx context.Context) error
 	Dispatch(ctx context.Context, task models.Task) error
 	ReceiveEvent(ctx context.Context) (models.TaskEvent, error)

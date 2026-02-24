@@ -1,17 +1,16 @@
 package client
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/models"
 )
 
@@ -20,14 +19,22 @@ import (
 type RemoteTaskManager struct {
 	baseURL    string
 	httpClient *http.Client
+	bus        events.TaskEventBus
 }
 
-// NewRemoteTaskManager creates a RemoteTaskManager targeting the given base URL.
-func NewRemoteTaskManager(baseURL string) *RemoteTaskManager {
+// NewRemoteTaskManager creates a client connected to a Manager API process.
+// If bus is provided, Subscribe uses it directly (e.g., NATS). Otherwise, it falls back to HTTP polling.
+func NewRemoteTaskManager(baseURL string, bus events.TaskEventBus) *RemoteTaskManager {
 	return &RemoteTaskManager{
 		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+		bus:        bus,
 	}
+}
+
+// Events returns the underlying event bus if one is configured.
+func (m *RemoteTaskManager) Events() events.TaskEventBus {
+	return m.bus
 }
 
 // Submit sends a fully-formed Task to POST /tasks on the manager.
@@ -111,32 +118,35 @@ func (m *RemoteTaskManager) List(ctx context.Context) []models.Task {
 	return tasks
 }
 
-// Subscribe opens an SSE connection to GET /events on the manager and forwards
-// all TaskEvents to the returned channel. The goroutine reconnects on disconnect
+// Subscribe polls GET /events/poll on the manager and forwards
+// all TaskEvents to the returned channel. The goroutine reconnects on failure
 // with a 2 s backoff and closes the channel when ctx is cancelled.
+// If a bus was provided during creation, it calls Subscribe on the bus directly.
 func (m *RemoteTaskManager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
+	if m.bus != nil {
+		return m.bus.Subscribe(ctx)
+	}
 	out := make(chan models.TaskEvent, 64)
-	go m.sseLoop(ctx, out)
+	go m.pollLoop(ctx, out)
 	return out, nil
 }
 
-func (m *RemoteTaskManager) sseLoop(ctx context.Context, out chan<- models.TaskEvent) {
+func (m *RemoteTaskManager) pollLoop(ctx context.Context, out chan<- models.TaskEvent) {
 	defer close(out)
 
-	// Separate client with no timeout — SSE connections are long-lived.
-	sseClient := &http.Client{}
-
+	var lastID int64
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.baseURL+"/events", nil)
+		url := fmt.Sprintf("%s/events/poll?afterID=%d", m.baseURL, lastID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return
 		}
 
-		resp, err := sseClient.Do(req)
+		resp, err := m.httpClient.Do(req)
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -146,33 +156,38 @@ func (m *RemoteTaskManager) sseLoop(ctx context.Context, out chan<- models.TaskE
 			continue
 		}
 
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-
-			var ev models.TaskEvent
-			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				continue
-			}
-
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
 			select {
-			case out <- ev:
 			case <-ctx.Done():
-				_ = resp.Body.Close()
 				return
+			case <-time.After(2 * time.Second):
 			}
+			continue
 		}
+
+		var evs []events.StoredEvent
+		err = json.NewDecoder(resp.Body).Decode(&evs)
 		_ = resp.Body.Close()
 
-		// Reconnect after disconnect.
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+
+		for _, e := range evs {
+			select {
+			case out <- e.Event:
+				if e.ID > lastID {
+					lastID = e.ID
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

@@ -16,9 +16,9 @@ import (
 	natsinternal "work-distribution-patterns/patterns/04-queue-and-store/internal/nats"
 	pgstore "work-distribution-patterns/patterns/04-queue-and-store/internal/postgres"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
 
@@ -65,9 +65,9 @@ func main() {
 		log.Printf("setup warning: %v", err)
 	}
 
-	hub := sse.NewHub()
-	natsBus := natsinternal.NewNATSProducer(nc, js)
-	mgr := manager.New(taskStore, natsBus, hub, 30*time.Second)
+	bus := events.NewNATSEventBus(nc)
+	dispatcher := natsinternal.NewNATSDispatcher(nc, js)
+	mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second)
 	mgr.Start(ctx)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
@@ -109,7 +109,7 @@ func main() {
 
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
-	e.GET("/events", api.SSEStream(hub))
+	e.GET("/events/poll", api.PollEvents(mgr.Events()))
 
 	log.Printf("Pattern 4 (Queue-and-Store) Manager listening on %s", cfg.Addr)
 	log.Fatal(e.Start(cfg.Addr))

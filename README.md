@@ -59,14 +59,14 @@ Browser
   ▼
 ┌─────────────────────────────────────────────────────┐
 │  shared/api  (HTTP handlers + SSE — 100% shared)    │
-│  POST /tasks → dispatcher.Submit(task)              │
+│  POST /tasks → manager.Submit(task)                 │
 │  GET  /events → sse.Hub.Subscribe()                 │
 └──────────────────┬──────────────────────────────────┘
-                   │ dispatch.Dispatcher interface
+                   │ contracts.TaskDispatcher interface
         ┌──────────┴─────────────────────────┐
         │                                    │
-  Pattern 1                          Pattern 2 / 3
-  PoolDispatcher              WSDispatcher / NATSDispatcher
+  Pattern 1                          Pattern 2 / 3 / 4
+  ChannelDispatcher              REST/WS/NATSDispatcher
   (in-process)                (routes to external workers)
 ```
 
@@ -107,17 +107,18 @@ make build-all
 ```
 shared/
 ├── models/       Task, Stage, ProgressEvent data types
-├── dispatch/     Dispatcher interface (THE key abstraction)
+├── contracts/    Interfaces (TaskDispatcher, TaskWorker, TaskManager)
 ├── sse/          SSE hub — broadcaster to all browser connections
-├── executor/     Stage runner — emits 10 progress ticks per stage
+├── executor/     Stage runner
 ├── store/        TaskStore interface + MemoryStore
 ├── api/          All HTTP handlers (shared across all patterns)
 └── templates/    Single embedded HTMX frontend
 
 patterns/
 ├── 01-goroutine-pool/    Bounded goroutine pool (in-process)
-├── 02-websocket-hub/     WebSocket dispatch to external workers
-└── 03-queue-and-store/    NATS JetStream (queue) + PostgreSQL (store) for full distribution
+├── 02-rest-polling/      REST-based worker polling
+├── 03-websocket-hub/     WebSocket dispatch to external workers
+└── 04-queue-and-store/   NATS JetStream (queue) + PostgreSQL (store)
 ```
 
 ## Environment Variables
@@ -168,7 +169,7 @@ Worker (`patterns/03-queue-and-store/cmd/worker`):
 
 ## Key Design Decisions
 
-- **`dispatch.Dispatcher`** is the only seam between HTTP and execution — `shared/api` never imports pattern-specific code.
-- **Stage duration** is controlled by the `STAGE_DURATION_SECS` environment variable on each server/worker process — it is not part of the task payload.
-- **`sse.Hub`** satisfies `executor.ProgressSink` directly in Pattern 1; Patterns 2/3 use adapter types.
-- **Pattern 3** has all API replicas subscribe to NATS Core progress subjects, so any replica can serve any SSE client — no sticky sessions.
+- **`contracts.TaskDispatcher`** is the only seam between HTTP and execution — `shared/api` never imports pattern-specific code.
+- **Stage duration** is controlled by the `MAX_STAGE_DURATION` environment variable on each server/worker process — it is not part of the task payload.
+- **`TaskConsumer`** satisfies the event reporting needs of the executor, providing a single view from the worker side.
+- **Pattern 4** has all API replicas subscribe to NATS Core progress subjects, so any replica can serve any SSE client — no sticky sessions.

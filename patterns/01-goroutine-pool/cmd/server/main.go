@@ -11,6 +11,7 @@ import (
 	"work-distribution-patterns/patterns/01-goroutine-pool/internal/goroutine"
 	"work-distribution-patterns/patterns/01-goroutine-pool/internal/worker"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/executor"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/sse"
@@ -33,13 +34,22 @@ func main() {
 
 	ctx := context.Background()
 
+	bus := events.NewMemoryEventBus()
 	hub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	producer, consumer := goroutine.New(cfg.QueueSize)
-	mgr := manager.New(taskStore, producer, hub, 0) // deadline=0 disables re-dispatch
+	dispatcher, consumer := goroutine.New(cfg.QueueSize)
+	mgr := manager.New(taskStore, dispatcher, bus, 0) // deadline=0 disables re-dispatch
 	mgr.Start(ctx)
+
+	// Pump events from the manager into the local hub for the browser
+	ch, _ := mgr.Subscribe(ctx)
+	go func() {
+		for ev := range ch {
+			hub.Publish(ev)
+		}
+	}()
 
 	for i := 0; i < cfg.Workers; i++ {
 		go worker.RunWorker(ctx, consumer, exec)

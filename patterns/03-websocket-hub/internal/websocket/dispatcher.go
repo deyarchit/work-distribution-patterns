@@ -15,7 +15,7 @@ import (
 )
 
 // Compile-time interface check.
-var _ dispatch.TaskProducer = (*WebSocketProducer)(nil)
+var _ dispatch.TaskDispatcher = (*WebSocketDispatcher)(nil)
 
 // msgTypeTask is sent from the API to a worker carrying the task to execute.
 const msgTypeTask = "task"
@@ -31,31 +31,31 @@ type workerConn struct {
 	id   string
 	conn *websocket.Conn
 	send chan []byte
-	hub  *WebSocketProducer
+	hub  *WebSocketDispatcher
 	busy bool
 }
 
-// WebSocketProducer manages connected remote workers and implements TaskProducer.
+// WebSocketDispatcher manages connected remote workers and implements TaskDispatcher.
 // Workers connect via HTTP GET /ws/register; Register is called by that handler.
-type WebSocketProducer struct {
+type WebSocketDispatcher struct {
 	mu      sync.Mutex
 	workers []*workerConn
 	nextIdx int
 	events  chan models.TaskEvent
 }
 
-// NewWebSocketProducer creates a WebSocketProducer with a buffered event channel.
-func NewWebSocketProducer() *WebSocketProducer {
-	return &WebSocketProducer{
+// NewWebSocketDispatcher creates a WebSocketDispatcher with a buffered event channel.
+func NewWebSocketDispatcher() *WebSocketDispatcher {
+	return &WebSocketDispatcher{
 		events: make(chan models.TaskEvent, 256),
 	}
 }
 
 // Start is a no-op; subscriptions are established per-connection via Register.
-func (p *WebSocketProducer) Start(_ context.Context) error { return nil }
+func (p *WebSocketDispatcher) Start(_ context.Context) error { return nil }
 
 // Register adds a new worker connection and starts its read/write pumps.
-func (p *WebSocketProducer) Register(conn *websocket.Conn) {
+func (p *WebSocketDispatcher) Register(conn *websocket.Conn) {
 	wc := &workerConn{
 		id:   uuid.New().String()[:8],
 		conn: conn,
@@ -72,7 +72,7 @@ func (p *WebSocketProducer) Register(conn *websocket.Conn) {
 
 // Dispatch sends the task to an idle worker using round-robin.
 // Returns ErrNoWorkers if all workers are busy or none are connected.
-func (p *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error {
+func (p *WebSocketDispatcher) Dispatch(_ context.Context, task models.Task) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -106,7 +106,7 @@ func (p *WebSocketProducer) Dispatch(_ context.Context, task models.Task) error 
 }
 
 // ReceiveEvent blocks until an event is available or ctx is cancelled.
-func (p *WebSocketProducer) ReceiveEvent(ctx context.Context) (models.TaskEvent, error) {
+func (p *WebSocketDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error) {
 	select {
 	case <-ctx.Done():
 		return models.TaskEvent{}, ctx.Err()
@@ -115,7 +115,7 @@ func (p *WebSocketProducer) ReceiveEvent(ctx context.Context) (models.TaskEvent,
 	}
 }
 
-func (p *WebSocketProducer) remove(wc *workerConn) {
+func (p *WebSocketDispatcher) remove(wc *workerConn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for i, w := range p.workers {

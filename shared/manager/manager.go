@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -10,8 +9,8 @@ import (
 	"github.com/labstack/echo/v4"
 
 	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
 )
 
@@ -19,35 +18,40 @@ import (
 var _ dispatch.TaskManager = (*Manager)(nil)
 
 // Manager is the unified task lifecycle owner.
-// It persists tasks, dispatches them via TaskProducer, routes events from the producer
-// to the store and SSE hub, and optionally re-dispatches stalled tasks.
+// It persists tasks, dispatches them via TaskDispatcher, routes events from the dispatcher
+// to the store and event bus, and optionally re-dispatches stalled tasks.
 type Manager struct {
-	store    store.TaskStore
-	bus      dispatch.TaskProducer
-	hub      *sse.Hub
-	deadline time.Duration
+	store      store.TaskStore
+	dispatcher dispatch.TaskDispatcher
+	events     events.TaskEventBus
+	deadline   time.Duration
 }
 
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
-func New(s store.TaskStore, bus dispatch.TaskProducer, hub *sse.Hub, deadline time.Duration) *Manager {
+func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration) *Manager {
 	return &Manager{
-		store:    s,
-		bus:      bus,
-		hub:      hub,
-		deadline: deadline,
+		store:      s,
+		dispatcher: d,
+		events:     evs,
+		deadline:   deadline,
 	}
 }
 
-// Submit persists the task then dispatches it via the bus.
-// Maps bus sentinel errors to appropriate HTTP status codes.
+// Events returns the event bus.
+func (m *Manager) Events() events.TaskEventBus {
+	return m.events
+}
+
+// Submit persists the task then dispatches it via the dispatcher.
+// Maps dispatcher sentinel errors to appropriate HTTP status codes.
 // On any dispatch error, marks the task failed in the store.
 func (m *Manager) Submit(ctx context.Context, task models.Task) error {
 	if err := m.store.Create(task); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if err := m.bus.Dispatch(ctx, task); err != nil {
+	if err := m.dispatcher.Dispatch(ctx, task); err != nil {
 		_ = m.store.SetStatus(task.ID, models.TaskFailed)
 		switch {
 		case errors.Is(err, dispatch.ErrDispatchFull):
@@ -79,55 +83,28 @@ func (m *Manager) List(_ context.Context) []models.Task {
 	return tasks
 }
 
-// Subscribe returns a channel that receives all TaskEvents published to the
-// hub. The channel is closed when ctx is cancelled. Used by Pattern 2's API
-// process to pump events into its local SSE hub.
+// Subscribe returns a channel that receives all TaskEvents.
 func (m *Manager) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
-	out := make(chan models.TaskEvent, 64)
-	raw, unsub := m.hub.Subscribe("")
-	go func() {
-		defer close(out)
-		defer unsub()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-raw:
-				if !ok {
-					return
-				}
-				var ev models.TaskEvent
-				if err := json.Unmarshal(data, &ev); err != nil {
-					continue
-				}
-				select {
-				case out <- ev:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return out, nil
+	return m.events.Subscribe(ctx)
 }
 
-// Start initialises the bus then launches the event and deadline goroutines.
+// Start initialises the dispatcher then launches the event and deadline goroutines.
 // It is non-blocking; call it once before serving requests.
 func (m *Manager) Start(ctx context.Context) {
-	if err := m.bus.Start(ctx); err != nil {
+	if err := m.dispatcher.Start(ctx); err != nil {
 		return
 	}
 	go m.runEventLoop(ctx)
 	go m.runDeadlineLoop(ctx)
 }
 
-// runEventLoop consumes all TaskEvents from the bus in a single goroutine,
+// runEventLoop consumes all TaskEvents from the dispatcher in a single goroutine,
 // guaranteeing that progress and status events are processed in the order
 // they were emitted. Terminal statuses are persisted; all events are forwarded
 // to the SSE hub.
 func (m *Manager) runEventLoop(ctx context.Context) {
 	for {
-		event, err := m.bus.ReceiveEvent(ctx)
+		event, err := m.dispatcher.ReceiveEvent(ctx)
 		if err != nil {
 			return
 		}
@@ -137,7 +114,7 @@ func (m *Manager) runEventLoop(ctx context.Context) {
 				_ = m.store.SetStatus(event.TaskID, status)
 			}
 		}
-		m.hub.Publish(event)
+		m.events.Publish(event)
 	}
 }
 
@@ -160,7 +137,7 @@ func (m *Manager) runDeadlineLoop(ctx context.Context) {
 					continue
 				}
 				if task.DispatchedAt != nil && now.Sub(*task.DispatchedAt) > m.deadline {
-					_ = m.bus.Dispatch(ctx, task)
+					_ = m.dispatcher.Dispatch(ctx, task)
 					_ = m.store.SetDispatchedAt(task.ID, now)
 				}
 			}

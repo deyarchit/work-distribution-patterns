@@ -46,15 +46,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := natsinternal.NewNATSConsumer(nc, js)
+	consumer := natsinternal.NewNATSConsumer(nc, js)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	log.Printf("Pattern 4 worker listening on NATS %s", cfg.NATSURL)
 
-	_ = source.Connect(ctx)
+	_ = consumer.Connect(ctx)
 
 	for {
-		task, err := source.Receive(ctx)
+		task, err := consumer.Receive(ctx)
 		if err != nil {
 			log.Printf("worker stopped: %v", err)
 			return
@@ -62,6 +62,6 @@ func main() {
 		// Synchronous: exec.Run completes before we receive the next task,
 		// preserving NATS at-least-once delivery (ACK happens in Connect after
 		// the task is delivered to Receive).
-		exec.Run(ctx, task, source)
+		exec.Run(ctx, task, consumer)
 	}
 }

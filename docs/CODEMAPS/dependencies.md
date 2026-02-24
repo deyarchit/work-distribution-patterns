@@ -1,4 +1,4 @@
-<!-- Commit: 0617358258f210256f7fed182c9f649941ee2c33 | Files scanned: 14 | Token estimate: ~600 -->
+<!-- Commit: 0f2a79be70e27faae9a536f6a02ab610528f049f | Files scanned: 16 | Token estimate: ~640 -->
 
 # Dependencies & Configuration
 
@@ -23,11 +23,11 @@ All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `d
 | `WORKERS` | `5` | P1 | Goroutine pool size |
 | `QUEUE_SIZE` | `20` | P1 | Max queued tasks before HTTP 429 |
 | `MAX_STAGE_DURATION` | `500` | P1, P2 worker, P3 worker, P4 worker | Max milliseconds per stage |
-| `MANAGER_URL` | `http://localhost:8081` | P2 API, P2 worker | Manager process base URL |
-| `WORKERS_QUEUE_SIZE` | `20` | P2 manager | Max queued tasks in RESTProducer before HTTP 429 |
-| `API_URL` | `ws://localhost:8080/ws/register` | P3 worker | WebSocket registration endpoint |
-| `NATS_URL` | `nats://127.0.0.1:4222` | P4 | NATS server URL |
-| `DATABASE_URL` | `postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable` | P4 | PostgreSQL connection string |
+| `MANAGER_URL` | `http://localhost:8081` | P2 API, P2 worker, P3 API, P4 API | Manager process base URL (HTTP for API; P2 worker also reads this) |
+| `WORKERS_QUEUE_SIZE` | `20` | P2 manager, P3 manager | Max queued tasks before HTTP 429 |
+| `MANAGER_URL` (WS) | `ws://localhost:8081/ws/register` | P3 worker | WebSocket registration endpoint on Manager |
+| `NATS_URL` | `nats://127.0.0.1:4222` | P4 manager | NATS server URL |
+| `DATABASE_URL` | `postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable` | P4 manager | PostgreSQL connection string |
 
 ## Container Topology
 
@@ -47,30 +47,34 @@ Workers and API talk to manager via `http://manager:8081`.
 
 ### Pattern 3 — Docker Compose (`03-websocket-hub`)
 ```
-[api ×1]       ← Dockerfile.api     (port 8080)
-[worker ×3]    ← Dockerfile.worker
+[manager ×1]   ← Dockerfile.manager  (port 8081, healthcheck /health; owns WebSocket hub + MemoryStore)
+[api ×1]       ← Dockerfile.api      (port 8080, depends_on manager healthy; MANAGER_URL=http://manager:8081)
+[worker ×3]    ← Dockerfile.worker   (MANAGER_URL=ws://manager:8081/ws/register)
 ```
-Workers connect to API via `ws://api:8080/ws/register`.
+Workers connect to Manager (not API) via WebSocket.
 
 ### Pattern 4 — Docker Compose (`04-queue-and-store`)
 ```
 [nginx]        ← nginx/nginx.conf   (port 8080 → upstream api)
-  ├─ [api ×3] ← Dockerfile.api     (depends_on: postgres healthy, nats started)
-  └─ [worker ×3] ← Dockerfile.worker
+  ├─ [api ×3] ← Dockerfile.api     (MANAGER_URL=http://manager:8081, depends_on manager healthy)
+[manager ×1]   ← Dockerfile.manager  (port 8081; owns NATS, postgres, SSE hub)
+[worker ×3]    ← Dockerfile.worker
 [nats]         ← nats:latest + nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
                ← named volume: nats-jetstream (persistent across restarts)
 [postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
 ```
-No sticky sessions: all API replicas subscribe to `task.events.*` on NATS Core.
+No sticky sessions: Manager subscribes to `task.events.*` on NATS Core and fans out to its hub; API replicas pump events from Manager's SSE endpoint into their local hubs.
 `pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
 **Note:** `nats.conf` is required — NATS 2.12+ defaults `Max Storage: 0 B` without explicit config.
 
 ## Build Targets
 
 ```bash
-make build-all      # builds all 8 binaries into bin/
-                    #   p1-server, p2-api, p2-manager, p2-worker,
-                    #   p3-api, p3-worker, p4-api, p4-worker
+make build-all      # builds all 10 binaries into bin/
+                    #   p1-server,
+                    #   p2-api, p2-manager, p2-worker,
+                    #   p3-api, p3-manager, p3-worker,
+                    #   p4-api, p4-manager, p4-worker
 make run-p1         # local run, no Docker
 make run-p2         # docker compose up (Pattern 2: REST polling)
 make run-p3         # docker compose up (Pattern 3: WebSocket hub)

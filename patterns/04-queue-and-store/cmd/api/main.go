@@ -6,9 +6,11 @@ import (
 	"log"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/nats-io/nats.go"
 
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
@@ -16,6 +18,7 @@ import (
 type config struct {
 	Addr       string `envconfig:"addr" default:":8080"`
 	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
 }
 
 func main() {
@@ -26,12 +29,18 @@ func main() {
 
 	ctx := context.Background()
 
-	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL)
+	nc, err := nats.Connect(cfg.NATSURL)
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	bus := events.NewNATSEventBus(nc)
+	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL, bus)
 	hub := sse.NewHub()
 
-	// Pump manager SSE events into the local hub so browser clients connected
-	// to this API process receive real-time progress updates.
-	ch, _ := taskManager.Subscribe(ctx)
+	// Use NATS directly for events instead of polling the manager.
+	ch, _ := bus.Subscribe(ctx)
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

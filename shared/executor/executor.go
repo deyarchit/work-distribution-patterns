@@ -21,17 +21,17 @@ type Executor struct {
 // terminal task_status=completed or task_status=failed event on exit.
 // Context cancellation is detected during each stage's sleep and immediately
 // emits a failed status before returning.
-func (e *Executor) Run(ctx context.Context, task models.Task, sink contracts.EventSink) {
+func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts.TaskConsumer) {
 	total := len(task.Stages)
 
-	_ = sink.Emit(ctx, models.TaskEvent{
+	_ = consumer.Emit(ctx, models.TaskEvent{
 		Type:   models.EventTaskStatus,
 		TaskID: task.ID,
 		Status: string(models.TaskRunning),
 	})
 
 	for stageIdx, stage := range task.Stages {
-		_ = sink.Emit(ctx, models.TaskEvent{
+		_ = consumer.Emit(ctx, models.TaskEvent{
 			Type:      models.EventProgress,
 			TaskID:    task.ID,
 			StageName: stage.Name,
@@ -45,7 +45,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink contracts.Eve
 
 		select {
 		case <-ctx.Done():
-			_ = sink.Emit(ctx, models.TaskEvent{
+			_ = consumer.Emit(ctx, models.TaskEvent{
 				Type:   models.EventTaskStatus,
 				TaskID: task.ID,
 				Status: string(models.TaskFailed),
@@ -54,7 +54,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink contracts.Eve
 		case <-time.After(stageDuration):
 		}
 
-		_ = sink.Emit(ctx, models.TaskEvent{
+		_ = consumer.Emit(ctx, models.TaskEvent{
 			Type:      models.EventProgress,
 			TaskID:    task.ID,
 			StageName: stage.Name,
@@ -62,7 +62,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, sink contracts.Eve
 		})
 	}
 
-	_ = sink.Emit(ctx, models.TaskEvent{
+	_ = consumer.Emit(ctx, models.TaskEvent{
 		Type:   models.EventTaskStatus,
 		TaskID: task.ID,
 		Status: string(models.TaskCompleted),

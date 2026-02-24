@@ -7,15 +7,15 @@ import (
 	"work-distribution-patterns/shared/executor"
 )
 
-// RunWorker loops indefinitely, pulling tasks from source and executing them.
-// The executor emits all status and progress events via source (EventSink).
+// RunWorker loops indefinitely, pulling tasks from consumer and executing them.
+// The executor emits all status and progress events via consumer (TaskConsumer).
 // Each call to RunWorker should run in its own goroutine.
-func RunWorker(ctx context.Context, source contracts.TaskConsumer, exec *executor.Executor) {
+func RunWorker(ctx context.Context, consumer contracts.TaskConsumer, exec *executor.Executor) {
 	for {
-		task, err := source.Receive(ctx)
+		task, err := consumer.Receive(ctx)
 		if err != nil {
 			return
 		}
-		exec.Run(ctx, task, source)
+		exec.Run(ctx, task, consumer)
 	}
 }

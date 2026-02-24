@@ -27,19 +27,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := restinternal.NewRESTConsumer(cfg.ManagerURL)
-	_ = source.Connect(ctx)
+	consumer := restinternal.NewRESTConsumer(cfg.ManagerURL)
+	_ = consumer.Connect(ctx)
 
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	log.Printf("Pattern 2 (REST Polling) Worker connecting to %s", cfg.ManagerURL)
 
 	for {
-		task, err := source.Receive(ctx)
+		task, err := consumer.Receive(ctx)
 		if err != nil {
 			log.Printf("worker stopped: %v", err)
 			return
 		}
-		go exec.Run(ctx, task, source)
+		go exec.Run(ctx, task, consumer)
 	}
 }

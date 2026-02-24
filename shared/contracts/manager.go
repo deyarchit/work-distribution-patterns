@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/models"
 )
 
@@ -15,11 +16,12 @@ import (
 //   - Receiving progress reports from workers and routing them to the SSE hub
 //   - Persisting the final terminal status (completed/failed) to the store
 //
-// Workers report progress via the ProgressSink they are given — they have no
+// Workers report progress via the TaskConsumer they are given — they have no
 // knowledge of stores, SSE, or browsers.
 type TaskManager interface {
 	Submit(ctx context.Context, task models.Task) error
 	Get(ctx context.Context, id string) (models.Task, bool)
 	List(ctx context.Context) []models.Task
 	Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+	Events() events.TaskEventBus
 }

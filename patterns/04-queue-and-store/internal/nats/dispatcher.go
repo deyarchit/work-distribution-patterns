@@ -12,21 +12,21 @@ import (
 )
 
 // Compile-time interface check.
-var _ dispatch.TaskProducer = (*NATSProducer)(nil)
+var _ dispatch.TaskDispatcher = (*NATSDispatcher)(nil)
 
-// NATSProducer implements TaskProducer using NATS JetStream for dispatch and
+// NATSDispatcher implements TaskDispatcher using NATS JetStream for dispatch and
 // NATS Core for receiving all task events from workers via a single subject.
 // Every API replica subscribes to task.events.*, so all SSE hubs receive
 // all events regardless of which replica the browser is connected to.
-type NATSProducer struct {
+type NATSDispatcher struct {
 	nc     *nats.Conn
 	js     nats.JetStreamContext
 	events chan models.TaskEvent
 }
 
-// NewNATSProducer creates a NATSProducer. Call Start to register NATS Core subscriptions.
-func NewNATSProducer(nc *nats.Conn, js nats.JetStreamContext) *NATSProducer {
-	return &NATSProducer{
+// NewNATSDispatcher creates a NATSDispatcher. Call Start to register NATS Core subscriptions.
+func NewNATSDispatcher(nc *nats.Conn, js nats.JetStreamContext) *NATSDispatcher {
+	return &NATSDispatcher{
 		nc:     nc,
 		js:     js,
 		events: make(chan models.TaskEvent, 256),
@@ -35,7 +35,7 @@ func NewNATSProducer(nc *nats.Conn, js nats.JetStreamContext) *NATSProducer {
 
 // Start registers a single NATS Core subscription for all task events.
 // It is non-blocking; the subscription callback pushes events into the internal channel.
-func (b *NATSProducer) Start(_ context.Context) error {
+func (b *NATSDispatcher) Start(_ context.Context) error {
 	_, err := b.nc.Subscribe("task.events.*", func(msg *nats.Msg) {
 		var ev models.TaskEvent
 		if err := json.Unmarshal(msg.Data, &ev); err != nil {
@@ -56,7 +56,7 @@ func (b *NATSProducer) Start(_ context.Context) error {
 }
 
 // Dispatch publishes the task to the "tasks.new" JetStream subject.
-func (b *NATSProducer) Dispatch(_ context.Context, task models.Task) error {
+func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error {
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func (b *NATSProducer) Dispatch(_ context.Context, task models.Task) error {
 }
 
 // ReceiveEvent blocks until an event is available or ctx is cancelled.
-func (b *NATSProducer) ReceiveEvent(ctx context.Context) (models.TaskEvent, error) {
+func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error) {
 	select {
 	case <-ctx.Done():
 		return models.TaskEvent{}, ctx.Err()

@@ -27,17 +27,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	source := wsinternal.NewWebSocketConsumer(cfg.ManagerURL)
+	consumer := wsinternal.NewWebSocketConsumer(cfg.ManagerURL)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	_ = source.Connect(ctx)
+	_ = consumer.Connect(ctx)
 
 	for {
-		task, err := source.Receive(ctx)
+		task, err := consumer.Receive(ctx)
 		if err != nil {
 			log.Printf("worker stopped: %v", err)
 			return
 		}
-		go exec.Run(ctx, task, source)
+		go exec.Run(ctx, task, consumer)
 	}
 }

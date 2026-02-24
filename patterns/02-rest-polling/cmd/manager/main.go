@@ -12,9 +12,9 @@ import (
 
 	restinternal "work-distribution-patterns/patterns/02-rest-polling/internal/rest"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
 	"work-distribution-patterns/shared/templates"
 )
@@ -33,9 +33,9 @@ func main() {
 	ctx := context.Background()
 
 	taskStore := store.NewMemoryStore()
-	hub := sse.NewHub()
-	producer := restinternal.NewRESTProducer(cfg.WorkersQueueSize)
-	mgr := manager.New(taskStore, producer, hub, 0)
+	bus := events.NewMemoryEventBus()
+	dispatcher := restinternal.NewRESTDispatcher(cfg.WorkersQueueSize)
+	mgr := manager.New(taskStore, dispatcher, bus, 0)
 	mgr.Start(ctx)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
@@ -79,12 +79,12 @@ func main() {
 
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
-	e.GET("/events", api.SSEStream(hub))
+	e.GET("/events/poll", api.PollEvents(mgr.Events()))
 	e.GET("/", api.Index(tpl))
 
 	// Worker polling endpoints.
-	e.GET("/work/next", producer.HandleNext)
-	e.POST("/work/events", producer.HandleEvent)
+	e.GET("/work/next", dispatcher.HandleNext)
+	e.POST("/work/events", dispatcher.HandleEvent)
 
 	log.Printf("Pattern 2 (REST Polling) Manager listening on %s [queue=%d]",
 		cfg.Addr, cfg.WorkersQueueSize)

@@ -26,7 +26,7 @@ func main() {
 
 	ctx := context.Background()
 
-	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL)
+	taskManager := client.NewRemoteTaskManager(cfg.ManagerURL, nil)
 	hub := sse.NewHub()
 
 	// Pump manager SSE events into the local hub so browser clients connected

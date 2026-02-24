@@ -1,5 +1,27 @@
 # Codemap Rationale Log
 
+## 0f2a79c — 2026-02-23
+Commits: `0f2a79b..0f2a79c` (Rename TaskProducer → TaskDispatcher, update TaskConsumer terminology)
+
+### Decisions
+- **Rename `TaskProducer` → `TaskDispatcher`**: More accurately describes the manager's role in routing tasks to workers. "Producer" was technically correct (producing tasks for a queue) but "Dispatcher" aligns better with the `TaskManager`'s orchestrating role.
+
+- **Prefer `TaskConsumer` over `TaskWorker`**: While "Worker" is a standard term for the execution entity, "Consumer" is the idiomatic term in message-based systems (especially NATS). Using `TaskDispatcher` + `TaskConsumer` provides a clear model: the manager dispatches work, and the consumer takes it from the transport to execute it.
+
+- **Remove `EventSink` interface**: Previously, `TaskConsumer` satisfied `EventSink` via its `Emit` method. The `Executor` used `EventSink` to remain unaware of the other consumer methods (`Connect`, `Receive`). Removing this intermediate interface simplifies the `contracts` package and provides a single, unified view from the worker side. The `Executor` now accepts `TaskConsumer` directly.
+
+- **Rename implementation types and variables for consistency**: `ChannelProducer` → `ChannelDispatcher`, `NATSConsumer` → `NATSWorker`, etc. Variable names like `source` and `bus` were renamed to `worker` and `dispatcher` throughout the codebase.
+
+## 0f2a79b — 2026-02-23
+Commits: `0617358..0f2a79b` (Separate manager process for P3 and P4; extract shared/client)
+
+### Decisions
+- **Extract `RemoteTaskManager` to `shared/client`**: Previously lived in `p02/internal/client`. P3 and P4 APIs now also use it (they were restructured to be thin proxies like P2). Moving it to `shared/client` avoids duplication and makes the shared transport contract explicit.
+
+- **P3: Split API (:8080) and Manager (:8081) into separate processes**: Previously the P3 API owned the WebSocket hub and MemoryStore directly (single-process). Splitting to API+Manager+Worker makes P3's topology match P2 and P4 — each pattern cleanly separates "HTTP frontend" from "task orchestration". Workers now register to `ws://manager:8081/ws/register` instead of the API.
+
+- **P4: API replicas become thin proxies (like P2/P3)**: Previously each API replica connected directly to NATS and postgres. All NATS and postgres ownership moved into the dedicated manager process. API replicas only hold `RemoteTaskManager` + a local `sse.Hub` fed by the manager's SSE stream. This eliminates connection pool multiplicity and clarifies responsibility boundaries.
+
 ## 0617358 — 2026-02-23
 Commits: `a3caca0..0617358` (Pattern 2 REST polling, renumber patterns, expand TaskManager, API layer refactor)
 

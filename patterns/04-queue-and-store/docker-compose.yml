@@ -50,9 +50,12 @@ services:
     environment:
       - ADDR=:8080
       - MANAGER_URL=http://manager:8081
+      - NATS_URL=nats://nats:4222
     depends_on:
       manager:
         condition: service_healthy
+      nats:
+        condition: service_started
     restart: on-failure
     deploy:
       replicas: 3
