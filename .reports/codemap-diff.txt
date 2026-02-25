@@ -1,4 +1,4 @@
-last-sha: f5c70505b68226bac66d88c059907dd521ec813f
+last-sha: b8f4814167e0e4012579e4b9cd5ac87fc497961c
 updated: 2026-02-24
-commit-range: 4751c24..f5c7050
-codemaps-touched: architecture.md backend.md dependencies.md rationale.md
+commit-range: f5c7050..b8f4814
+codemaps-touched: architecture.md backend.md dependencies.md

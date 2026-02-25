@@ -21,24 +21,20 @@ var _ dispatch.TaskManager = (*Manager)(nil)
 // It persists tasks, dispatches them via TaskDispatcher, routes events from the dispatcher
 // to the store and event bus, and optionally re-dispatches stalled tasks.
 type Manager struct {
-	store                 store.TaskStore
-	dispatcher            dispatch.TaskDispatcher
-	events                events.TaskEventBus
-	deadline              time.Duration
-	republishWorkerEvents bool
+	store      store.TaskStore
+	dispatcher dispatch.TaskDispatcher
+	events     events.TaskEventBus
+	deadline   time.Duration
 }
 
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
-// republishWorkerEvents controls whether worker events are republished to the event bus.
-// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P5 (NATS peer subscription).
-func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration, republishWorkerEvents bool) *Manager {
+func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration) *Manager {
 	return &Manager{
-		store:                 s,
-		dispatcher:            d,
-		events:                evs,
-		deadline:              deadline,
-		republishWorkerEvents: republishWorkerEvents,
+		store:      s,
+		dispatcher: d,
+		events:     evs,
+		deadline:   deadline,
 	}
 }
 
@@ -108,9 +104,7 @@ func (m *Manager) runEventLoop(ctx context.Context) {
 				_ = m.store.SetStatus(event.TaskID, status)
 			}
 		}
-		if m.republishWorkerEvents {
-			m.events.Publish(event)
-		}
+		m.events.Publish(event)
 	}
 }
 

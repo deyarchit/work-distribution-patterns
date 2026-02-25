@@ -44,7 +44,7 @@ func main() {
 	bus := events.NewMemoryEventBus()
 	hub := sse.NewHub()
 	dispatcher := wsinternal.NewWebSocketDispatcher()
-	mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true for MemoryEventBus
+	mgr := manager.New(taskStore, dispatcher, bus, 0)
 	mgr.Start(ctx)
 
 	// Pump manager events into SSE hub for API processes to subscribe

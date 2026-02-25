@@ -8,15 +8,21 @@ Commits: `96111a2..f5c7050` (Add grpc pattern, rename pattern 04 → 05)
 - **Rename P4 → P5 (NATS JetStream pattern)**: "P4" is now gRPC, so the previous queue-and-store pattern (NATS+postgres) becomes P5. The progression is now: goroutines → REST → WebSocket → gRPC → NATS+postgres.
 - **Protobuf schema for P4**: `work.proto` defines `Task`, `TaskEvent`, `DispatchRequest`, `EventStream` messages. Auto-generated `work.pb.go` and `work_grpc.pb.go` provide type safety and code generation benefits (compared to ad-hoc JSON over WebSocket).
 
+## 756de21 — 2026-02-24
+Commits: `f5c7050..756de21` (Simplify Manager and separate NATS subjects)
+
+### Decisions
+- **Remove conditional event republishing in Manager**: Removed the `republishWorkerEvents` flag from `Manager.New()`. The Manager now *always* republishes worker events to the event bus after processing and persisting them.
+- **Separate NATS subjects for P5**:
+    - **Worker-to-Manager**: Workers now emit to `worker.events.<taskID>`.
+    - **Manager-to-API**: Manager republishes to `task.events.<taskID>`.
+    This "Manager as Gateway" model ensures that all UI updates (SSE) reflect the state already persisted in the database, providing better consistency and decoupling.
+
 ## 4751c24 — 2026-02-24
 Commits: `40d4c7d..4751c24` (Fix bug in manager for nats pattern)
 
 ### Decisions
-- **Conditional event republishing in Manager**: Added `republishWorkerEvents` flag to `Manager.New()` to control whether worker events are republished to the event bus.
-  - **P1–P3** (`republishWorkerEvents=true`): Use `MemoryEventBus`, which requires explicit republishing of dispatcher events to feed the SSE hub. Without republishing, browser subscribers receive no worker progress/status updates.
-  - **P5** (`republishWorkerEvents=false`): Use `NATSEventBus`, where the dispatcher publishes directly to NATS `task.events.*` and APIs subscribe directly. Republishing to the event bus is redundant — it was incorrectly happening before this fix, causing duplicate event flow.
-
-  This bug fix ensures P5 doesn't duplicate event publication and maintains the correct event flow for each pattern.
+- **Added `republishWorkerEvents` flag to `Manager.New()`**: (Legacy decision - superseded by 756de21) Used to control whether worker events are republished to the event bus. This has since been removed in favor of a unified republishing model with separate subjects.
 
 ## 89762b6 — 2026-02-24
 Commits: `420cf39..89762b6` (Rename pattern folders, configure repomix, update codemaps)

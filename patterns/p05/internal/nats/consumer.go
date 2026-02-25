@@ -90,12 +90,13 @@ func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error) {
 	}
 }
 
-// Emit publishes a TaskEvent to "task.events.<taskID>" via NATS Core.
-// All API replicas subscribe to this subject, ensuring every SSE hub receives the event.
+// Emit publishes a TaskEvent to "worker.events.<taskID>" via NATS Core.
+// The Manager subscribes to this subject, persists the event, then republishes
+// it to the API-facing event bus.
 func (s *NATSConsumer) Emit(_ context.Context, event models.TaskEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	return s.nc.Publish("task.events."+event.TaskID, data)
+	return s.nc.Publish("worker.events."+event.TaskID, data)
 }

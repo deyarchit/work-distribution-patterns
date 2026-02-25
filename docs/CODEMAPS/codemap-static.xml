@@ -1359,67 +1359,6 @@ var cfg config
 // Subscribe directly to NATS for events (distributed pub/sub).
 </file>
 
-<file path="patterns/p05/cmd/manager/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"net/http"
-	"time"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"github.com/nats-io/nats.go"
-	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
-	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"net/http"
-"time"
-"github.com/jackc/pgx/v5/pgxpool"
-"github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-"github.com/nats-io/nats.go"
-natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
-pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr        string `envconfig:"addr" default:":8081"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second, false) // republishWorkerEvents=false; API subscribes directly to NATS
-⋮----
-// Build the router manually — the manager accepts a fully-formed Task
-// (pre-created by the API with models.NewTask) rather than a submit request.
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
-⋮----
-// Accept a fully-formed Task forwarded by the API process.
-⋮----
-var task models.Task
-</file>
-
 <file path="patterns/p05/cmd/worker/main.go">
 package main
 import (
@@ -1455,99 +1394,6 @@ var cfg config
 // Synchronous: exec.Run completes before we receive the next task,
 // preserving NATS at-least-once delivery (ACK happens in Connect after
 // the task is delivered to Receive).
-</file>
-
-<file path="patterns/p05/internal/nats/consumer.go">
-package natsinternal
-import (
-	"context"
-	"encoding/json"
-	"log"
-	"github.com/nats-io/nats.go"
-	dispatch "work-distribution-patterns/shared/contracts"
-	"work-distribution-patterns/shared/models"
-)
-⋮----
-"context"
-"encoding/json"
-"log"
-"github.com/nats-io/nats.go"
-dispatch "work-distribution-patterns/shared/contracts"
-"work-distribution-patterns/shared/models"
-⋮----
-// Compile-time interface check.
-var _ dispatch.TaskConsumer = (*NATSConsumer)(nil)
-// NATSConsumer implements TaskConsumer over NATS.
-// It receives tasks from JetStream (queue-subscribe with manual ACK for
-// at-least-once delivery) and emits all task events via NATS Core.
-// The worker loop is synchronous — one task at a time — preserving NATS
-// at-least-once delivery semantics.
-type NATSConsumer struct {
-	nc    *nats.Conn
-	js    nats.JetStreamContext
-	tasks chan models.Task
-}
-// NewNATSConsumer creates a NATSConsumer. Call Connect to start the subscription.
-func NewNATSConsumer(nc *nats.Conn, js nats.JetStreamContext) *NATSConsumer
-// Connect starts the JetStream queue subscription in a background goroutine (non-blocking).
-func (s *NATSConsumer) Connect(ctx context.Context) error
-func (s *NATSConsumer) subscribe(ctx context.Context)
-⋮----
-var task models.Task
-⋮----
-// Block until the main loop picks up the task, then ACK.
-// If the process crashes before Receive returns, NATS redelivers.
-⋮----
-// Receive blocks until a task is available or ctx is cancelled.
-func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error)
-// Emit publishes a TaskEvent to "task.events.<taskID>" via NATS Core.
-// All API replicas subscribe to this subject, ensuring every SSE hub receives the event.
-func (s *NATSConsumer) Emit(_ context.Context, event models.TaskEvent) error
-</file>
-
-<file path="patterns/p05/internal/nats/dispatcher.go">
-package natsinternal
-import (
-	"context"
-	"encoding/json"
-	"log"
-	"github.com/nats-io/nats.go"
-	dispatch "work-distribution-patterns/shared/contracts"
-	"work-distribution-patterns/shared/models"
-)
-⋮----
-"context"
-"encoding/json"
-"log"
-"github.com/nats-io/nats.go"
-dispatch "work-distribution-patterns/shared/contracts"
-"work-distribution-patterns/shared/models"
-⋮----
-// Compile-time interface check.
-var _ dispatch.TaskDispatcher = (*NATSDispatcher)(nil)
-// NATSDispatcher implements TaskDispatcher using NATS JetStream for dispatch and
-// NATS Core for receiving all task events from workers via a single subject.
-// Every API replica subscribes to task.events.*, so all SSE hubs receive
-// all events regardless of which replica the browser is connected to.
-type NATSDispatcher struct {
-	nc     *nats.Conn
-	js     nats.JetStreamContext
-	events chan models.TaskEvent
-}
-// NewNATSDispatcher creates a NATSDispatcher. Call Start to register NATS Core subscriptions.
-func NewNATSDispatcher(nc *nats.Conn, js nats.JetStreamContext) *NATSDispatcher
-// Start registers a single NATS Core subscription for all task events.
-// It is non-blocking; the subscription callback pushes events into the internal channel.
-func (b *NATSDispatcher) Start(_ context.Context) error
-⋮----
-var ev models.TaskEvent
-⋮----
-b.events <- ev // blocking: must not lose terminal status
-⋮----
-// Dispatch publishes the task to the "tasks.new" JetStream subject.
-func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error
-// ReceiveEvent blocks until an event is available or ctx is cancelled.
-func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 </file>
 
 <file path="patterns/p05/internal/nats/setup.go">
@@ -1681,184 +1527,6 @@ import "embed"
 var FS embed.FS
 </file>
 
-<file path="patterns/p01/cmd/server/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"time"
-	"github.com/kelseyhightower/envconfig"
-	"work-distribution-patterns/patterns/p01/internal/goroutine"
-	"work-distribution-patterns/patterns/p01/internal/worker"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/executor"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"time"
-"github.com/kelseyhightower/envconfig"
-"work-distribution-patterns/patterns/p01/internal/goroutine"
-"work-distribution-patterns/patterns/p01/internal/worker"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/executor"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr             string `envconfig:"addr" default:":8080"`
-	Workers          int    `envconfig:"workers" default:"5"`
-	QueueSize        int    `envconfig:"queue_size" default:"20"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-mgr := manager.New(taskStore, dispatcher, bus, 0, true) // deadline=0 disables re-dispatch; republishWorkerEvents=true
-⋮----
-// Pump events from the bus into the local hub for the browser
-</file>
-
-<file path="patterns/p02/cmd/manager/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"net/http"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	restinternal "work-distribution-patterns/patterns/p02/internal/rest"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"net/http"
-"github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-restinternal "work-distribution-patterns/patterns/p02/internal/rest"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr             string `envconfig:"addr" default:":8081"`
-	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true for MemoryEventBus
-⋮----
-// Pump manager events into SSE hub for API processes to subscribe
-⋮----
-// Build the router manually to avoid the route collision on POST /tasks
-// that api.NewRouter would cause — the manager needs a custom handler that
-// accepts a fully-formed Task (not the {name, stage_count} submit request).
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
-⋮----
-// Accept a fully-formed Task forwarded by the API process.
-// The API already called models.NewTask(...); we must not create a new UUID.
-⋮----
-var task models.Task
-⋮----
-// Worker polling endpoints.
-</file>
-
-<file path="patterns/p03/cmd/manager/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"net/http"
-	"github.com/gorilla/websocket"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"net/http"
-"github.com/gorilla/websocket"
-"github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr             string `envconfig:"addr" default:":8081"`
-	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
-}
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-func main()
-⋮----
-var cfg config
-⋮----
-mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true for MemoryEventBus
-⋮----
-// Pump manager events into SSE hub for API processes to subscribe
-⋮----
-// Build the router manually — the manager accepts a fully-formed Task
-// (pre-created by the API with models.NewTask) rather than a submit request.
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
-⋮----
-// Accept a fully-formed Task forwarded by the API process.
-⋮----
-var task models.Task
-⋮----
-// Worker WebSocket registration — workers connect here to receive tasks.
-</file>
-
 <file path="patterns/p04/cmd/api/main.go">
 package main
 import (
@@ -1923,6 +1591,160 @@ type config struct {
 func main()
 ⋮----
 var cfg config
+</file>
+
+<file path="patterns/p05/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go"
+	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"github.com/nats-io/nats.go"
+natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Build the router manually — the manager accepts a fully-formed Task
+// (pre-created by the API with models.NewTask) rather than a submit request.
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p05/internal/nats/consumer.go">
+package natsinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"github.com/nats-io/nats.go"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"github.com/nats-io/nats.go"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskConsumer = (*NATSConsumer)(nil)
+// NATSConsumer implements TaskConsumer over NATS.
+// It receives tasks from JetStream (queue-subscribe with manual ACK for
+// at-least-once delivery) and emits all task events via NATS Core.
+// The worker loop is synchronous — one task at a time — preserving NATS
+// at-least-once delivery semantics.
+type NATSConsumer struct {
+	nc    *nats.Conn
+	js    nats.JetStreamContext
+	tasks chan models.Task
+}
+// NewNATSConsumer creates a NATSConsumer. Call Connect to start the subscription.
+func NewNATSConsumer(nc *nats.Conn, js nats.JetStreamContext) *NATSConsumer
+// Connect starts the JetStream queue subscription in a background goroutine (non-blocking).
+func (s *NATSConsumer) Connect(ctx context.Context) error
+func (s *NATSConsumer) subscribe(ctx context.Context)
+⋮----
+var task models.Task
+⋮----
+// Block until the main loop picks up the task, then ACK.
+// If the process crashes before Receive returns, NATS redelivers.
+⋮----
+// Receive blocks until a task is available or ctx is cancelled.
+func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error)
+// Emit publishes a TaskEvent to "worker.events.<taskID>" via NATS Core.
+// The Manager subscribes to this subject, persists the event, then republishes
+// it to the API-facing event bus.
+func (s *NATSConsumer) Emit(_ context.Context, event models.TaskEvent) error
+</file>
+
+<file path="patterns/p05/internal/nats/dispatcher.go">
+package natsinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"github.com/nats-io/nats.go"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"github.com/nats-io/nats.go"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskDispatcher = (*NATSDispatcher)(nil)
+// NATSDispatcher implements TaskDispatcher using NATS JetStream for dispatch and
+// NATS Core for receiving all task events from workers via a single subject.
+// Every API replica subscribes to task.events.*, but workers emit to
+// worker.events.*. The Manager acts as a gateway, processing worker events
+// before republishing them to the API-facing subject.
+type NATSDispatcher struct {
+	nc     *nats.Conn
+	js     nats.JetStreamContext
+	events chan models.TaskEvent
+}
+// NewNATSDispatcher creates a NATSDispatcher. Call Start to register NATS Core subscriptions.
+func NewNATSDispatcher(nc *nats.Conn, js nats.JetStreamContext) *NATSDispatcher
+// Start registers a single NATS Core subscription for all worker events.
+// It is non-blocking; the subscription callback pushes events into the internal channel.
+func (b *NATSDispatcher) Start(_ context.Context) error
+⋮----
+var ev models.TaskEvent
+⋮----
+b.events <- ev // blocking: must not lose terminal status
+⋮----
+// Dispatch publishes the task to the "tasks.new" JetStream subject.
+func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error
+// ReceiveEvent blocks until an event is available or ctx is cancelled.
+func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 </file>
 
 <file path="shared/events/memory.go">
@@ -2033,20 +1855,66 @@ var sr submitResponse
 var tr taskResponse
 </file>
 
-<file path="patterns/p04/cmd/manager/main.go">
+<file path="patterns/p01/cmd/server/main.go">
 package main
 import (
 	"context"
 	"html/template"
 	"log"
-	"net"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p01/internal/goroutine"
+	"work-distribution-patterns/patterns/p01/internal/worker"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"time"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p01/internal/goroutine"
+"work-distribution-patterns/patterns/p01/internal/worker"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/executor"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr             string `envconfig:"addr" default:":8080"`
+	Workers          int    `envconfig:"workers" default:"5"`
+	QueueSize        int    `envconfig:"queue_size" default:"20"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+mgr := manager.New(taskStore, dispatcher, bus, 0) // deadline=0 disables re-dispatch
+⋮----
+// Pump events from the bus into the local hub for the browser
+</file>
+
+<file path="patterns/p02/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
 	"net/http"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"google.golang.org/grpc"
-	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-	pb "work-distribution-patterns/patterns/p04/proto"
+	restinternal "work-distribution-patterns/patterns/p02/internal/rest"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/manager"
@@ -2059,14 +1927,11 @@ import (
 "context"
 "html/template"
 "log"
-"net"
 "net/http"
 "github.com/kelseyhightower/envconfig"
 "github.com/labstack/echo/v4"
 "github.com/labstack/echo/v4/middleware"
-"google.golang.org/grpc"
-grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-pb "work-distribution-patterns/patterns/p04/proto"
+restinternal "work-distribution-patterns/patterns/p02/internal/rest"
 "work-distribution-patterns/shared/api"
 "work-distribution-patterns/shared/events"
 "work-distribution-patterns/shared/manager"
@@ -2076,29 +1941,92 @@ pb "work-distribution-patterns/patterns/p04/proto"
 "work-distribution-patterns/shared/templates"
 ⋮----
 type config struct {
-	HTTPAddr string `envconfig:"http_addr" default:":8081"`
-	GRPCAddr string `envconfig:"grpc_addr" default:":9091"`
+	Addr             string `envconfig:"addr" default:":8081"`
+	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
 }
 func main()
 ⋮----
 var cfg config
 ⋮----
-// Create gRPC server
+// Pump manager events into SSE hub for API processes to subscribe
 ⋮----
-// Start manager (handles task lifecycle and event routing)
-mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true
+// Build the router manually to avoid the route collision on POST /tasks
+// that api.NewRouter would cause — the manager needs a custom handler that
+// accepts a fully-formed Task (not the {name, stage_count} submit request).
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+// The API already called models.NewTask(...); we must not create a new UUID.
+⋮----
+var task models.Task
+⋮----
+// Worker polling endpoints.
+</file>
+
+<file path="patterns/p03/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"github.com/gorilla/websocket"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"github.com/gorilla/websocket"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr             string `envconfig:"addr" default:":8081"`
+	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
+}
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+func main()
+⋮----
+var cfg config
 ⋮----
 // Pump manager events into SSE hub for API processes to subscribe
 ⋮----
-// Start gRPC server in background
-⋮----
-// HTTP API for compatibility with existing patterns (for remote API to call)
+// Build the router manually — the manager accepts a fully-formed Task
+// (pre-created by the API with models.NewTask) rather than a submit request.
 ⋮----
 e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
 ⋮----
-// HTTP endpoint for API to submit tasks (compatibility with shared/client.RemoteTaskManager)
+// Accept a fully-formed Task forwarded by the API process.
 ⋮----
 var task models.Task
+⋮----
+// Worker WebSocket registration — workers connect here to receive tasks.
 </file>
 
 <file path="shared/contracts/consumer.go">
@@ -2194,6 +2122,73 @@ type TaskStore interface {
 	SetStatus(id string, status models.TaskStatus) error
 	SetDispatchedAt(id string, t time.Time) error
 }
+</file>
+
+<file path="patterns/p04/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net"
+	"net/http"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"google.golang.org/grpc"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net"
+"net/http"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"google.golang.org/grpc"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	HTTPAddr string `envconfig:"http_addr" default:":8081"`
+	GRPCAddr string `envconfig:"grpc_addr" default:":9091"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Create gRPC server
+⋮----
+// Start manager (handles task lifecycle and event routing)
+⋮----
+// Pump manager events into SSE hub for API processes to subscribe
+⋮----
+// Start gRPC server in background
+⋮----
+// HTTP API for compatibility with existing patterns (for remote API to call)
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// HTTP endpoint for API to submit tasks (compatibility with shared/client.RemoteTaskManager)
+⋮----
+var task models.Task
 </file>
 
 <file path="shared/contracts/manager.go">
@@ -2646,17 +2641,14 @@ var _ dispatch.TaskManager = (*Manager)(nil)
 // It persists tasks, dispatches them via TaskDispatcher, routes events from the dispatcher
 // to the store and event bus, and optionally re-dispatches stalled tasks.
 type Manager struct {
-	store                 store.TaskStore
-	dispatcher            dispatch.TaskDispatcher
-	events                events.TaskEventBus
-	deadline              time.Duration
-	republishWorkerEvents bool
+	store      store.TaskStore
+	dispatcher dispatch.TaskDispatcher
+	events     events.TaskEventBus
+	deadline   time.Duration
 }
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
-// republishWorkerEvents controls whether worker events are republished to the event bus.
-// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P5 (NATS peer subscription).
-func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration, republishWorkerEvents bool) *Manager
+func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration) *Manager
 // Submit persists the task then dispatches it via the dispatcher.
 // Maps dispatcher sentinel errors to appropriate HTTP status codes.
 // On any dispatch error, marks the task failed in the store.

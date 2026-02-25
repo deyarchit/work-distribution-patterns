@@ -16,8 +16,9 @@ var _ dispatch.TaskDispatcher = (*NATSDispatcher)(nil)
 
 // NATSDispatcher implements TaskDispatcher using NATS JetStream for dispatch and
 // NATS Core for receiving all task events from workers via a single subject.
-// Every API replica subscribes to task.events.*, so all SSE hubs receive
-// all events regardless of which replica the browser is connected to.
+// Every API replica subscribes to task.events.*, but workers emit to
+// worker.events.*. The Manager acts as a gateway, processing worker events
+// before republishing them to the API-facing subject.
 type NATSDispatcher struct {
 	nc     *nats.Conn
 	js     nats.JetStreamContext
@@ -33,10 +34,10 @@ func NewNATSDispatcher(nc *nats.Conn, js nats.JetStreamContext) *NATSDispatcher 
 	}
 }
 
-// Start registers a single NATS Core subscription for all task events.
+// Start registers a single NATS Core subscription for all worker events.
 // It is non-blocking; the subscription callback pushes events into the internal channel.
 func (b *NATSDispatcher) Start(_ context.Context) error {
-	_, err := b.nc.Subscribe("task.events.*", func(msg *nats.Msg) {
+	_, err := b.nc.Subscribe("worker.events.*", func(msg *nats.Msg) {
 		var ev models.TaskEvent
 		if err := json.Unmarshal(msg.Data, &ev); err != nil {
 			return

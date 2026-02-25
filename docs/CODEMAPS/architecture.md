@@ -1,4 +1,4 @@
-<!-- Commit: f5c70505b68226bac66d88c059907dd521ec813f | Files scanned: 58 | Token estimate: ~1050 -->
+<!-- Commit: b8f4814167e0e4012579e4b9cd5ac87fc497961c | Files scanned: 58 | Token estimate: ~1050 -->
 
 # Architecture
 
@@ -49,7 +49,7 @@ Browser ──POST /tasks──► shared/api ──► Manager ──► Channe
                                                           │ buffered events chan (directional)
                          sse.Hub ◄── pump ◄── MemoryEventBus ◄──┐
                             │                                    │
-                         RunWorker goroutines                    Manager.runEventLoop (republishes=true)
+                         RunWorker goroutines                    Manager.runEventLoop
                                     └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]
                                            │ event emission ────────┘
 Browser ◄── GET /events ───┘
@@ -68,7 +68,7 @@ Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Clie
                                                                                                                          │
                            Worker ──polls── GET /work/next ◄─────────────────────────────────────────────────────────┤
                                  └──── POST /work/events ──────────────────────────────────► RESTDispatcher ──►┐       │
-                                                                                                Manager.runEventLoop (republishes=true)
+                                                                                                Manager.runEventLoop
 ```
 
 - `shared/client.RemoteTaskManager` proxies Submit/Get/List to manager over HTTP
@@ -85,10 +85,9 @@ Browser ──POST /tasks──► API (:8080) ──► RemoteTaskManager.Submi
 Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryEventBus ◄──┐
                                                                                                                          │
                            Worker process ◄── WebSocketConsumer.Receive() ◄── WebSocket ────────────────┐             │
-                                    └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]        │             │
-                                           │ event emission ───────────────────► Manager.runEventLoop (republishes=true)
-```
-
+                                                                         └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]        │             │
+                                                                                │ event emission ───────────────────► Manager.runEventLoop
+                                    ```
 - `shared/client.RemoteTaskManager` proxies Submit/Get/List to manager over HTTP
 - Manager pumps `MemoryEventBus` → SSE hub; API subscribes via `sse.Client`
 - Store: `MemoryStore` (manager-local); Backpressure: HTTP 503; Deadline loop: disabled
@@ -102,10 +101,9 @@ Browser ──POST /tasks──► API (:8080) ──► RemoteTaskManager.Submi
 Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryEventBus ◄──┐
                                                                                                                          │
                            Worker process ◄── gRPCConsumer.Receive() ◄── gRPC stream ────────────────┐             │
-                                    └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]        │             │
-                                           │ event emission ───────────────────► Manager.runEventLoop (republishes=true)
-```
-
+                                                                         └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]        │             │
+                                                                                │ event emission ───────────────────► Manager.runEventLoop
+                                    ```
 - `shared/client.RemoteTaskManager` proxies Submit/Get/List to manager over HTTP
 - Manager pumps `MemoryEventBus` → SSE hub; API subscribes via `sse.Client`
 - `gRPCDispatcher`: maintains persistent bidirectional gRPC streams with workers; `Dispatch` sends tasks over stream
@@ -123,14 +121,15 @@ Browser ◄── GET /events ◄── NATS sub (task.events.*) ─────
                                                                       NATSEventBus              │
                                                                             ▲                   │
                                                                             │              Worker NATSConsumer.Receive()
-                                                                            │              exec.Run → Emit → task.events.<id>
-                                                                            │              (Manager.runEventLoop does NOT republish;
-                                                                            │               republishWorkerEvents=false)
-                         Manager.runEventLoop → PostgreSQL
+                                                                            │              exec.Run → Emit → worker.events.<id>
+                                                                            │                       │
+                         Manager.runEventLoop → PostgreSQL ─────────────────┘                       │
+                                    ▲                                                               │
+                                    └───────────────────────────────────────────────────────────────┘
 ```
 
 - API replicas are thin proxies; Manager owns NATS, postgres, `NATSEventBus`
-- APIs subscribe directly to NATS `task.events.*` (no SSE hub needed); Manager does NOT republish to event bus
+- APIs subscribe directly to NATS `task.events.*` (no SSE hub needed); Manager republishes to this bus after processing worker events.
 - Store: `pgstore.Store` (PostgreSQL — shared across replicas); Deadline: 30 s re-dispatch
-- NATS used for both queueing (JetStream tasks.new) and event streaming (Core task.events.*)
+- NATS used for both queueing (JetStream tasks.new) and event streaming (Core worker.events.* and task.events.*)
 - Env (API): `MANAGER_URL`, `NATS_URL`; Env (manager): `NATS_URL`, `DATABASE_URL`

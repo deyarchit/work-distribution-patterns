@@ -45,7 +45,7 @@ func main() {
 	dispatcher := grpcinternal.NewDispatcher(grpcServer)
 
 	// Start manager (handles task lifecycle and event routing)
-	mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true
+	mgr := manager.New(taskStore, dispatcher, bus, 0)
 	mgr.Start(ctx)
 
 	// Pump manager events into SSE hub for API processes to subscribe
