@@ -40,7 +40,7 @@ func main() {
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	dispatcher, consumer := goroutine.New(cfg.QueueSize)
-	mgr := manager.New(taskStore, dispatcher, bus, 0) // deadline=0 disables re-dispatch
+	mgr := manager.New(taskStore, dispatcher, bus, 0, true) // deadline=0 disables re-dispatch; republishWorkerEvents=true
 	mgr.Start(ctx)
 
 	// Pump events from the bus into the local hub for the browser

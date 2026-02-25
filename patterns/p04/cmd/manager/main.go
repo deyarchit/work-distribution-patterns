@@ -67,7 +67,7 @@ func main() {
 
 	bus := events.NewNATSEventBus(nc)
 	dispatcher := natsinternal.NewNATSDispatcher(nc, js)
-	mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second)
+	mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second, false) // republishWorkerEvents=false; API subscribes directly to NATS
 	mgr.Start(ctx)
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")

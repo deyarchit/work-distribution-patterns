@@ -37,7 +37,7 @@ func main() {
 	bus := events.NewMemoryEventBus()
 	hub := sse.NewHub()
 	dispatcher := restinternal.NewRESTDispatcher(cfg.WorkersQueueSize)
-	mgr := manager.New(taskStore, dispatcher, bus, 0)
+	mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true for MemoryEventBus
 	mgr.Start(ctx)
 
 	// Pump manager events into SSE hub for API processes to subscribe

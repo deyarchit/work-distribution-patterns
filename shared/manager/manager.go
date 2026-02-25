@@ -21,20 +21,24 @@ var _ dispatch.TaskManager = (*Manager)(nil)
 // It persists tasks, dispatches them via TaskDispatcher, routes events from the dispatcher
 // to the store and event bus, and optionally re-dispatches stalled tasks.
 type Manager struct {
-	store      store.TaskStore
-	dispatcher dispatch.TaskDispatcher
-	events     events.TaskEventBus
-	deadline   time.Duration
+	store                 store.TaskStore
+	dispatcher            dispatch.TaskDispatcher
+	events                events.TaskEventBus
+	deadline              time.Duration
+	republishWorkerEvents bool
 }
 
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
-func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration) *Manager {
+// republishWorkerEvents controls whether worker events are republished to the event bus.
+// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P4 (NATS peer subscription).
+func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration, republishWorkerEvents bool) *Manager {
 	return &Manager{
-		store:      s,
-		dispatcher: d,
-		events:     evs,
-		deadline:   deadline,
+		store:                 s,
+		dispatcher:            d,
+		events:                evs,
+		deadline:              deadline,
+		republishWorkerEvents: republishWorkerEvents,
 	}
 }
 
@@ -90,8 +94,8 @@ func (m *Manager) Start(ctx context.Context) {
 
 // runEventLoop consumes all TaskEvents from the dispatcher in a single goroutine,
 // guaranteeing that progress and status events are processed in the order
-// they were emitted. Terminal statuses are persisted; all events are forwarded
-// to the SSE hub.
+// they were emitted. Terminal statuses are persisted; events are conditionally
+// republished to the event bus based on republishWorkerEvents.
 func (m *Manager) runEventLoop(ctx context.Context) {
 	for {
 		event, err := m.dispatcher.ReceiveEvent(ctx)
@@ -104,7 +108,9 @@ func (m *Manager) runEventLoop(ctx context.Context) {
 				_ = m.store.SetStatus(event.TaskID, status)
 			}
 		}
-		m.events.Publish(event)
+		if m.republishWorkerEvents {
+			m.events.Publish(event)
+		}
 	}
 }
 
