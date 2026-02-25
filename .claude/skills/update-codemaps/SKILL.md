@@ -1,31 +1,32 @@
+---
+name: update-codemaps
+description: Incrementally update architecture codemaps using git diffs since the last processed commit
+tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+model: haiku
+---
+
 # Update Codemaps
 
 Incrementally update architecture codemaps using git diffs since the last processed commit.
 
-## Step 1: Determine Change Range
+## Step 1: Collect Change Context
 
-Run the following to determine the change range:
-
-```bash
-# Extract last processed SHA (returns empty string if file missing or field absent)
-grep '^last-sha:' .reports/codemap-diff.txt 2>/dev/null | awk '{print $2}'
-
-git rev-parse HEAD
-```
-
-- If a SHA was returned: set `BASE_SHA=<that value>`. Run `git log <BASE_SHA>..HEAD --oneline` to confirm new commits exist. If none, print "Codemaps are up to date." and stop.
-- If empty (file missing or first run): set `BASE_SHA=""` and proceed with a full scan of source files instead of a git diff.
-
-## Step 2: Collect the Diff
+Run the helper script to collect all git context in one shot:
 
 ```bash
-git diff <BASE_SHA>..HEAD --name-status
-git log  <BASE_SHA>..HEAD --oneline
+bash ./scripts/collect-diff.sh
 ```
 
-Focus only on these diff outputs. Do not scan the entire project unless `BASE_SHA` is empty.
+This script will:
+- Extract the last processed commit SHA from `.reports/codemap-diff.txt`
+- Check if there are new commits since last run
+- Exit early if codemaps are up to date
+- Collect commit log and file changes
+- Output structured metadata, commits, changed files, and diff stats
 
-## Step 3: Analyse What Changed
+If the script exits with "Codemaps are up to date", stop here.
+
+## Step 2: Analyse What Changed
 
 From the diff, identify:
 - Files added / removed / renamed
@@ -35,7 +36,7 @@ From the diff, identify:
 - Container / build tooling topology changes
 - New external dependencies
 
-## Step 4: Update Codemaps
+## Step 3: Update Codemaps
 
 Read only the codemaps affected by the identified changes and apply targeted edits — change only the sections that reflect the diff. Do not rewrite unaffected sections. Keep each codemap under 1000 tokens.
 
@@ -70,7 +71,7 @@ Commits: `<BASE_SHA_SHORT>..<HEAD_SHA_SHORT>`
 
 Keep each run's block under ~200 tokens. Snippets are optional.
 
-## Step 5: Update codemap-diff.txt
+## Step 4: Update codemap-diff.txt
 
 Overwrite `.reports/codemap-diff.txt` with:
 
@@ -90,3 +91,4 @@ No narrative prose — just these structured fields for machine readability.
 - Keep each codemap under **1000 tokens** for efficient context loading
 - Use ASCII diagrams for data flow instead of verbose descriptions
 - Run after major feature additions or refactoring sessions
+
