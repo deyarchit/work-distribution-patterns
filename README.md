@@ -1,8 +1,6 @@
 # Work Distribution Patterns
 
-A Go demo exploring various work-distribution patterns with progressively increasing scalability and decoupling.
-
-![Architecture Overview](docs/overview.excalidraw.png)
+A project exploring various work-distribution patterns with progressively increasing scalability and decoupling.
 
 ## Patterns
 
@@ -11,9 +9,56 @@ A Go demo exploring various work-distribution patterns with progressively increa
 | **p01: Local-Channels** | Single process | In-process channels | Embedded Monolith |
 | **p02: Pull-REST** | 1 API + N workers | HTTP Long-polling | Tiered Remote Polling |
 | **p03: Push-WebSocket** | 1 API + N workers | Persistent WebSockets | Tiered Remote Push |
+| **p04: Streaming-gRPC** | 1 API + N workers | gRPC Bidirectional Streams | Tiered Remote Streaming |
 | **p05: Brokered-NATS** | N APIs + N workers | NATS + PostgreSQL | Distributed Event-Driven |
 
 All patterns expose an **identical HTTP API** and **identical HTMX frontend**. Only the internal dispatch mechanism and layering changes.
+
+## Prerequisites
+
+### Runtime Dependencies (Required)
+
+All patterns require:
+- **Go 1.25+**
+- **Docker** and **Docker Compose** (for patterns 2-5)
+
+> **Note:** Pattern 4 uses gRPC, but the generated protobuf code is **already checked into the repository** (`patterns/p04/proto/*.pb.go`). You do **not** need to install protoc or any code generators unless you plan to modify the `.proto` file itself.
+
+### Development Dependencies (Optional)
+
+**Only needed if modifying `patterns/p04/proto/work.proto`:**
+
+- **protoc** (Protocol Buffers compiler)
+- **protoc-gen-go** (Go protobuf code generator)
+- **protoc-gen-go-grpc** (Go gRPC code generator)
+
+#### Installing Protobuf Toolchain (Development Only)
+
+**On macOS (via Homebrew):**
+```bash
+brew install protobuf
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+```
+
+**Verify Installation:**
+```bash
+protoc --version        # Should show libprotoc 3.x or higher
+which protoc-gen-go     # Should be in $GOPATH/bin or ~/go/bin
+which protoc-gen-go-grpc
+```
+
+**Note:** Ensure `$GOPATH/bin` (or `~/go/bin`) is in your `$PATH`:
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+#### Regenerating Protobuf Code
+
+After modifying `patterns/p04/proto/work.proto`:
+```bash
+make gen-proto
+```
 
 ## Quick Start
 
@@ -38,6 +83,13 @@ make run-p3
 # open http://localhost:8080
 ```
 
+### Pattern 4: Streaming-gRPC (Docker)
+
+```bash
+make run-p4
+# open http://localhost:8080
+```
+
 ### Pattern 5: Brokered-NATS (Docker)
 
 ```bash
@@ -58,22 +110,11 @@ Browser
 │  GET  /events → sse.Hub.Subscribe()                 │
 └──────────────────┬──────────────────────────────────┘
                    │ contracts.TaskDispatcher interface
-        ┌──────────┴─────────────────────────┐
-        │                                    │
-      p01                                 p02 / p03 / p05
-  ChannelDispatcher              REST/WS/NATSDispatcher
-  (in-process)                (routes to external workers)
-```
-
-## API Contract
-
-```
-POST /tasks          {"name", "stage_count" (1-8, default 3)}
-                     → 202 {"id":"..."}
-GET  /tasks          → []Task
-GET  /tasks/{id}     → Task
-GET  /events         SSE stream
-GET  /               HTMX frontend
+        ┌──────────┴─────────────────────────────────┐
+        │                                            │
+      p01                                 p02 / p03 / p04 / p05
+  ChannelDispatcher              REST/WS/gRPC/NATSDispatcher
+  (in-process)                    (routes to external workers)
 ```
 
 ## Testing
@@ -111,5 +152,6 @@ patterns/
 ├── p01/          Local-Channels: Bounded goroutine pool (in-process)
 ├── p02/          Pull-REST: REST-based worker polling
 ├── p03/          Push-WebSocket: WebSocket dispatch to external workers
+├── p04/          Streaming-gRPC: gRPC bidirectional streams with protobuf
 └── p05/          Brokered-NATS: NATS JetStream (queue) + PostgreSQL (store)
 ```
