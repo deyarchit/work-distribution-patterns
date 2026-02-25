@@ -1,4 +1,4 @@
-<!-- Commit: b8f4814167e0e4012579e4b9cd5ac87fc497961c | Files scanned: 60 | Token estimate: ~980 -->
+<!-- Commit: 9e8e54c814d7beab20c8bdde9ad160e2bad59fa3 | Files scanned: 60 | Token estimate: ~980 -->
 
 # Backend Codemap
 
@@ -11,7 +11,7 @@
 | `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, single `runEventLoop` conditionally routes worker events to event bus (true for MemoryEventBus, false for NATS) |
 | `shared/executor` | `executor.go` | Stage runner; emits all events (running/progress/terminal) via `contracts.TaskConsumer`; returns nothing |
 | `shared/models` | `task.go` | `Task`, `Stage`, `TaskEvent`, `TaskStatus`, event-type constants |
-| `shared/events` | `events.go`, `memory.go`, `nats.go` | `TaskEventBus` interface; `MemoryEventBus` (P1–P3), `NATSEventBus` (P5) |
+| `shared/events` | `events.go`, `memory.go`, `nats.go` | `TaskEventBridge` interface (split into Publisher/Subscriber); `MemoryBridge` (P1–P4), `NATSBridge` (P5) |
 | `shared/sse` | `hub.go`, `client.go` | `Hub`: SSE fan-out; `Client`: SSE subscriber (used by P2/P3 APIs) |
 | `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
@@ -66,16 +66,15 @@ type TaskConsumer interface {
 }
 
 // events/events.go
-type TaskEventBus interface {
-    Publish(event models.TaskEvent)
-    Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
-}
+type TaskEventPublisher interface { Publish(models.TaskEvent) }
+type TaskEventSubscriber interface { Subscribe(context.Context) (<-chan models.TaskEvent, error) }
+type TaskEventBridge interface { TaskEventPublisher; TaskEventSubscriber }
 
 // shared/api/server.go
 func NewRouter(hub *sse.Hub, tpl *template.Template, manager contracts.TaskManager) *echo.Echo
 
 // manager/manager.go
-func New(s store.TaskStore, d contracts.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration, republishWorkerEvents bool) *Manager
+func New(s store.TaskStore, d contracts.TaskDispatcher, evs events.TaskEventPublisher, deadline time.Duration) *Manager
 func (m *Manager) Start(ctx context.Context)   // non-blocking; launches runEventLoop + deadline goroutines
 func (m *Manager) Submit(ctx context.Context, task models.Task) error
 func (m *Manager) Get(_ context.Context, id string) (models.Task, bool)
@@ -87,12 +86,12 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 
 ## Pattern-Specific Notes
 
-**Pattern 1** — `ChannelDispatcher`+`ChannelConsumer` share a single `events chan TaskEvent` (created together by `New`). Directional channel types enforce ownership at compile time. `RunWorker` loops: `Receive` → `exec.Run(ctx, task, consumer)`; executor handles all event emission. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled (`deadline=0`).
+**Pattern 1** — `ChannelDispatcher`+`ChannelConsumer` share a single `events chan TaskEvent` (created together by `New`). Directional channel types enforce ownership at compile time. `RunWorker` loops: `Receive` → `exec.Run(ctx, task, consumer)`; executor handles all event emission. Manager republishes events to MemoryBridge. Deadline disabled (`deadline=0`).
 
-**Pattern 2** — Three separate processes: API, Manager, Worker. `shared/client.RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP. Manager creates `MemoryEventBus` and pumps it to SSE hub; API subscribes via `sse.Client`. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTDispatcher.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled.
+**Pattern 2** — Three separate processes: API, Manager, Worker. `shared/client.RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP. Manager creates `MemoryBridge` and pumps it to SSE hub; API subscribes via `sse.Client`. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTDispatcher.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Manager republishes events to MemoryBridge. Deadline disabled.
 
-**Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher`, `MemoryEventBus`, and MemoryStore. Manager pumps `MemoryEventBus` to SSE hub; API subscribes via `sse.Client`. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled.
+**Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher`, `MemoryBridge`, and MemoryStore. Manager pumps `MemoryBridge` to SSE hub; API subscribes via `sse.Client`. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Manager republishes events to MemoryBridge. Deadline disabled.
 
-**Pattern 4** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `gRPCDispatcher`, `MemoryEventBus`, and MemoryStore. Manager pumps `MemoryEventBus` to SSE hub; API subscribes via `sse.Client`. `gRPCDispatcher.Start` listens for gRPC connections on configured address; `Dispatch` sends tasks over established streams. `gRPCConsumer` maintains persistent bidirectional stream with manager, emits events as gRPC messages. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled. Uses protobuf-generated code from `work.proto`.
+**Pattern 4** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `gRPCDispatcher`, `MemoryBridge`, and MemoryStore. Manager pumps `MemoryBridge` to SSE hub; API subscribes via `sse.Client`. `gRPCDispatcher.Start` listens for gRPC connections on configured address; `Dispatch` sends tasks over established streams. `gRPCConsumer` maintains persistent bidirectional stream with manager, emits events as gRPC messages. Manager republishes events to MemoryBridge. Deadline disabled. Uses protobuf-generated code from `work.proto`.
 
-**Pattern 5** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager does NOT republish events to event bus (`republishWorkerEvents=false`) because APIs subscribe directly to NATS `task.events.*`. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.
+**Pattern 5** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager always republishes events to `NATSBridge` after processing worker events. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.

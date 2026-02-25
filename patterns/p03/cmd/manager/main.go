@@ -41,7 +41,7 @@ func main() {
 	ctx := context.Background()
 
 	taskStore := store.NewMemoryStore()
-	bus := events.NewMemoryEventBus()
+	bus := events.NewMemoryBridge()
 	hub := sse.NewHub()
 	dispatcher := wsinternal.NewWebSocketDispatcher()
 	mgr := manager.New(taskStore, dispatcher, bus, 0)

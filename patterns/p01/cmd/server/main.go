@@ -34,7 +34,7 @@ func main() {
 
 	ctx := context.Background()
 
-	bus := events.NewMemoryEventBus()
+	bus := events.NewMemoryBridge()
 	hub := sse.NewHub()
 	taskStore := store.NewMemoryStore()
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}

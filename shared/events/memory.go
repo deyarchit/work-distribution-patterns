@@ -7,18 +7,19 @@ import (
 	"work-distribution-patterns/shared/models"
 )
 
-type MemoryEventBus struct {
+// MemoryBridge implements TaskEventBridge using in-memory channels.
+type MemoryBridge struct {
 	mu   sync.RWMutex
 	live map[chan models.TaskEvent]struct{}
 }
 
-func NewMemoryEventBus() *MemoryEventBus {
-	return &MemoryEventBus{
+func NewMemoryBridge() *MemoryBridge {
+	return &MemoryBridge{
 		live: make(map[chan models.TaskEvent]struct{}),
 	}
 }
 
-func (m *MemoryEventBus) Publish(event models.TaskEvent) {
+func (m *MemoryBridge) Publish(event models.TaskEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -32,7 +33,7 @@ func (m *MemoryEventBus) Publish(event models.TaskEvent) {
 	}
 }
 
-func (m *MemoryEventBus) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
+func (m *MemoryBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
 	ch := make(chan models.TaskEvent, 64)
 	m.mu.Lock()
 	m.live[ch] = struct{}{}

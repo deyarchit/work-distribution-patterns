@@ -37,7 +37,7 @@ func main() {
 	ctx := context.Background()
 
 	taskStore := store.NewMemoryStore()
-	bus := events.NewMemoryEventBus()
+	bus := events.NewMemoryBridge()
 	hub := sse.NewHub()
 
 	// Create gRPC server

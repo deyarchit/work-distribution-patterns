@@ -115,12 +115,13 @@ lint:
 fmt:
 	golangci-lint fmt ./...
 
-## Update repomap
+## Update codemaps
 update-codemaps:
 	@echo "Running repomix to generate static codemap"
 	npx repomix@latest
 	@echo "Launching Claude Code to run skill: $(SKILL_NAME)..."
-	claude --model="haiku" --permission-mode="acceptEdits" "run the $(SKILL_NAME) skill"
+	claude -p "run the $(SKILL_NAME) skill" --model "haiku" --allowedTools "Bash,Read,Edit,Write" --output-format stream-json --verbose --include-partial-messages | \
+  jq -rj 'select(.type == "stream_event" and .event.delta.type? == "text_delta") | .event.delta.text'
 	@echo "Updated codemaps"
 
 .PHONY: *

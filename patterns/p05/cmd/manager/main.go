@@ -65,7 +65,7 @@ func main() {
 		log.Printf("setup warning: %v", err)
 	}
 
-	bus := events.NewNATSEventBus(nc)
+	bus := events.NewNATSBridge(nc)
 	dispatcher := natsinternal.NewNATSDispatcher(nc, js)
 	mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second)
 	mgr.Start(ctx)

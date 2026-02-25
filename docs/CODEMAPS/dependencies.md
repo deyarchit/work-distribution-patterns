@@ -1,4 +1,4 @@
-<!-- Commit: b8f4814167e0e4012579e4b9cd5ac87fc497961c | Files scanned: 18 | Token estimate: ~700 -->
+<!-- Commit: 9e8e54c814d7beab20c8bdde9ad160e2bad59fa3 | Files scanned: 18 | Token estimate: ~700 -->
 
 # Dependencies & Configuration
 
@@ -68,14 +68,14 @@ Workers connect to Manager via gRPC bidirectional streams.
 ```
 [nginx]        ← patterns/p05/nginx/nginx.conf   (port 8080 → upstream api)
   ├─ [api ×3] ← patterns/p05/Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
-[manager ×1]   ← patterns/p05/Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns NATSEventBus, postgres, SSE hub)
+[manager ×1]   ← patterns/p05/Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns NATSBridge, postgres, SSE hub)
 [worker ×3]    ← patterns/p05/Dockerfile.worker
 [nats]         ← nats:latest + patterns/p05/nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
                ← named volume: nats-jetstream (persistent across restarts)
 [postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
 ```
 No sticky sessions: API replicas subscribe directly to NATS `task.events.*` for distributed event streaming.
-Manager uses `NATSEventBus` to publish events; `pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
+Manager uses `NATSBridge` to publish events; `pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
 **Note:** `nats.conf` is required — NATS 2.12+ defaults `Max Storage: 0 B` without explicit config.
 
 ## Build Targets

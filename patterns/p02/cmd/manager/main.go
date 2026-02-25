@@ -34,7 +34,7 @@ func main() {
 	ctx := context.Background()
 
 	taskStore := store.NewMemoryStore()
-	bus := events.NewMemoryEventBus()
+	bus := events.NewMemoryBridge()
 	hub := sse.NewHub()
 	dispatcher := restinternal.NewRESTDispatcher(cfg.WorkersQueueSize)
 	mgr := manager.New(taskStore, dispatcher, bus, 0)

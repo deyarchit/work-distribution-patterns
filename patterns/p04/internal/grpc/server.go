@@ -24,7 +24,7 @@ type Server struct {
 	pb.UnimplementedTaskManagerServer
 
 	store    store.TaskStore
-	eventBus events.TaskEventBus
+	eventBus events.TaskEventSubscriber
 
 	// Worker management
 	mu             sync.RWMutex
@@ -42,7 +42,7 @@ type Server struct {
 }
 
 // NewServer creates a new gRPC server
-func NewServer(st store.TaskStore, evBus events.TaskEventBus) *Server {
+func NewServer(st store.TaskStore, evBus events.TaskEventSubscriber) *Server {
 	return &Server{
 		store:          st,
 		eventBus:       evBus,

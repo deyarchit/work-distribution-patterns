@@ -1,5 +1,13 @@
 # Codemap Rationale Log
 
+## 9e8e54c — 2026-02-25
+Commits: `473fff3..9e8e54c` (Refactor TaskEventBus interface and implementations)
+
+### Decisions
+- **Split `TaskEventBus` into `TaskEventPublisher` and `TaskEventSubscriber`**: The original single interface mixed two concerns (publishing and subscribing). Splitting them enables Interface Segregation Principle: managers can accept just `TaskEventPublisher`, subscribers can depend on just `TaskEventSubscriber`. This decouples the two sides and simplifies dependency injection across patterns.
+- **Introduced `TaskEventBridge` as the unified interface**: For components that need both publish and subscribe capabilities (e.g., `MemoryBridge`, `NATSBridge`), `TaskEventBridge` embeds both. This provides opt-in unification for implementations while maintaining fine-grained interfaces at the dependency level.
+- **Updated all pattern managers and event implementations**: All `MemoryBridge`, `NATSBridge` implementations and their usages (`Manager.New` signatures) reflect the split interfaces, ensuring consistency across all five patterns.
+
 ## f5c7050 — 2026-02-24
 Commits: `96111a2..f5c7050` (Add grpc pattern, rename pattern 04 → 05)
 
@@ -34,11 +42,11 @@ Commits: `420cf39..89762b6` (Rename pattern folders, configure repomix, update c
 Commits: `0f2a79b..420cf39` (Remove polling; extract event bus abstraction)
 
 ### Decisions
-- **Remove `TaskManager.Subscribe()` and extract `events.TaskEventBus`**: Previously, `TaskManager` owned event subscription — remote APIs called `RemoteTaskManager.Subscribe()` which internally used SSE polling. This mixed task management with event transport. The new `TaskEventBus` interface (Publish/Subscribe) provides clean separation: managers publish to the bus, wiring in `main.go` pumps bus → SSE hub, APIs subscribe via transport-specific clients (`sse.Client` for P2/P3, NATS for P5).
+- **Remove `TaskManager.Subscribe()` and extract `events.TaskEventBridge`**: Previously, `TaskManager` owned event subscription — remote APIs called `RemoteTaskManager.Subscribe()` which internally used SSE polling. This mixed task management with event transport. The new `TaskEventBridge` interface (split into `TaskEventPublisher` and `TaskEventSubscriber`) provides clean separation: managers publish to the bridge, wiring in `main.go` pumps it to the SSE hub; APIs subscribe via transport-specific clients or directly.
 
 - **`shared/sse/client.go` replaces `RemoteTaskManager.Subscribe`**: P2/P3 APIs now use `sse.Client` to subscribe to manager's SSE endpoint. Reconnection logic (exponential backoff) is centralized in `Client.streamWithReconnect`, removing duplicated SSE parsing from `RemoteTaskManager`.
 
-- **Pattern-specific event wiring in `main.go`**: P1–P3 use `MemoryEventBus` + SSE; P5 uses `NATSEventBus` + direct NATS subscription in API replicas. Event flow is now explicit and visible at startup, not buried in cross-process HTTP calls.
+- **Pattern-specific event wiring in `main.go`**: P1–P4 use `MemoryBridge` + SSE; P5 uses `NATSBridge` + direct NATS subscription in API replicas. Event flow is now explicit and visible at startup, not buried in cross-process HTTP calls.
 
 - **P5 API requires `NATS_URL`**: APIs subscribe directly to NATS `task.events.*` instead of polling manager's SSE endpoint, eliminating the manager as event bottleneck and enabling true distributed pub/sub.
 

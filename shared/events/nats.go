@@ -10,15 +10,16 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-type NATSEventBus struct {
+// NATSBridge implements TaskEventBridge using NATS Core.
+type NATSBridge struct {
 	nc *nats.Conn
 }
 
-func NewNATSEventBus(nc *nats.Conn) *NATSEventBus {
-	return &NATSEventBus{nc: nc}
+func NewNATSBridge(nc *nats.Conn) *NATSBridge {
+	return &NATSBridge{nc: nc}
 }
 
-func (n *NATSEventBus) Publish(event models.TaskEvent) {
+func (n *NATSBridge) Publish(event models.TaskEvent) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return
@@ -27,7 +28,7 @@ func (n *NATSEventBus) Publish(event models.TaskEvent) {
 	_ = n.nc.Publish(subject, data)
 }
 
-func (n *NATSEventBus) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
+func (n *NATSBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
 	ch := make(chan models.TaskEvent, 64)
 	sub, err := n.nc.Subscribe("task.events.*", func(msg *nats.Msg) {
 		var ev models.TaskEvent

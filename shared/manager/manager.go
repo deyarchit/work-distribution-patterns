@@ -23,13 +23,13 @@ var _ dispatch.TaskManager = (*Manager)(nil)
 type Manager struct {
 	store      store.TaskStore
 	dispatcher dispatch.TaskDispatcher
-	events     events.TaskEventBus
+	events     events.TaskEventPublisher
 	deadline   time.Duration
 }
 
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
-func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration) *Manager {
+func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventPublisher, deadline time.Duration) *Manager {
 	return &Manager{
 		store:      s,
 		dispatcher: d,
@@ -90,8 +90,8 @@ func (m *Manager) Start(ctx context.Context) {
 
 // runEventLoop consumes all TaskEvents from the dispatcher in a single goroutine,
 // guaranteeing that progress and status events are processed in the order
-// they were emitted. Terminal statuses are persisted; events are conditionally
-// republished to the event bus based on republishWorkerEvents.
+// they were emitted. Terminal statuses are persisted and all events are
+// republished to the event bridge.
 func (m *Manager) runEventLoop(ctx context.Context) {
 	for {
 		event, err := m.dispatcher.ReceiveEvent(ctx)

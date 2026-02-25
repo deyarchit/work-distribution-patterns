@@ -1,4 +1,4 @@
-<!-- Commit: b8f4814167e0e4012579e4b9cd5ac87fc497961c | Files scanned: 58 | Token estimate: ~1050 -->
+<!-- Commit: 9e8e54c814d7beab20c8bdde9ad160e2bad59fa3 | Files scanned: 58 | Token estimate: ~1050 -->
 
 # Architecture
 
@@ -12,7 +12,7 @@ Five patterns demonstrating different work distribution topologies, all sharing 
 contracts.TaskManager      Submit/Get/List                       — API → Manager
 contracts.TaskDispatcher   Start/Dispatch/ReceiveEvent           — manager-side transport view
 contracts.TaskConsumer     Connect/Receive/Emit                  — worker-side transport view
-events.TaskEventBus        Publish/Subscribe                     — event streaming abstraction
+events.TaskEventBridge      Publish/Subscribe                     — event streaming abstraction (split into Publisher/Subscriber)
 store.TaskStore            Create/Get/List/SetStatus             — task persistence
 ```
 
@@ -21,7 +21,7 @@ store.TaskStore            Create/Get/List/SetStatus             — task persis
 Sentinel errors from `Dispatch`: `ErrDispatchFull` → HTTP 429, `ErrNoWorkers` → HTTP 503.
 
 `TaskManager.Get/List` let the API query task state without direct store access.
-Event streaming is wired explicitly in `main.go`: managers publish to `TaskEventBus`, which is pumped to SSE hub; APIs subscribe via `sse.Client` (P2/P3/P4) or NATS (P5).
+Event streaming is wired explicitly in `main.go`: managers publish to `TaskEventBridge` (via `TaskEventPublisher`), which is pumped to SSE hub; APIs subscribe via `sse.Client` (P2/P3/P4) or NATS (P5).
 `shared/client.RemoteTaskManager` implements `TaskManager` by proxying Submit/Get/List over HTTP; used by P2/P3/P4 APIs.
 
 ## Process Topology
@@ -47,7 +47,7 @@ Transport    per-pattern         dispatcher.go (TaskDispatcher) + consumer.go (T
 ```
 Browser ──POST /tasks──► shared/api ──► Manager ──► ChannelDispatcher.Dispatch()
                                                           │ buffered events chan (directional)
-                         sse.Hub ◄── pump ◄── MemoryEventBus ◄──┐
+                         sse.Hub ◄── pump ◄── MemoryBridge ◄──┐
                             │                                    │
                          RunWorker goroutines                    Manager.runEventLoop
                                     └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]
@@ -64,7 +64,7 @@ Browser ◄── GET /events ───┘
 ```
 Browser ──POST /tasks──► API (:8080) ──► RemoteTaskManager.Submit ──► POST /tasks ──► Manager (:8081)
                                                                                             │ RESTDispatcher.Dispatch
-Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryEventBus ◄──┐
+Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryBridge ◄──┐
                                                                                                                          │
                            Worker ──polls── GET /work/next ◄─────────────────────────────────────────────────────────┤
                                  └──── POST /work/events ──────────────────────────────────► RESTDispatcher ──►┐       │
@@ -72,7 +72,7 @@ Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Clie
 ```
 
 - `shared/client.RemoteTaskManager` proxies Submit/Get/List to manager over HTTP
-- Manager pumps `MemoryEventBus` → SSE hub; API subscribes via `sse.Client`
+- Manager pumps `MemoryBridge` → SSE hub; API subscribes via `sse.Client`
 - `RESTDispatcher`: non-blocking `Dispatch` to buffered chan; blocking GET /work/next for workers
 - Store: `MemoryStore` (manager-local); Backpressure: HTTP 429; Deadline loop: disabled
 - Env: `MANAGER_URL`, `WORKERS_QUEUE_SIZE`, `MAX_STAGE_DURATION`
@@ -82,14 +82,14 @@ Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Clie
 ```
 Browser ──POST /tasks──► API (:8080) ──► RemoteTaskManager.Submit ──► POST /tasks ──► Manager (:8081)
                                                                                             │ WebSocketDispatcher.Dispatch
-Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryEventBus ◄──┐
+Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryBridge ◄──┐
                                                                                                                          │
                            Worker process ◄── WebSocketConsumer.Receive() ◄── WebSocket ────────────────┐             │
                                                                          └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]        │             │
                                                                                 │ event emission ───────────────────► Manager.runEventLoop
                                     ```
 - `shared/client.RemoteTaskManager` proxies Submit/Get/List to manager over HTTP
-- Manager pumps `MemoryEventBus` → SSE hub; API subscribes via `sse.Client`
+- Manager pumps `MemoryBridge` → SSE hub; API subscribes via `sse.Client`
 - Store: `MemoryStore` (manager-local); Backpressure: HTTP 503; Deadline loop: disabled
 - Worker registration: `GET /ws/register` on Manager → `WebSocketDispatcher.Register(conn)`
 
@@ -98,14 +98,14 @@ Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Clie
 ```
 Browser ──POST /tasks──► API (:8080) ──► RemoteTaskManager.Submit ──► POST /tasks ──► Manager (:8081)
                                                                                             │ gRPCDispatcher.Dispatch
-Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryEventBus ◄──┐
+Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Client ◄── GET /events (SSE) ◄── mgr hub ◄── MemoryBridge ◄──┐
                                                                                                                          │
                            Worker process ◄── gRPCConsumer.Receive() ◄── gRPC stream ────────────────┐             │
                                                                          └── exec.Run(ctx, task, consumer)  [consumer = TaskConsumer]        │             │
                                                                                 │ event emission ───────────────────► Manager.runEventLoop
                                     ```
 - `shared/client.RemoteTaskManager` proxies Submit/Get/List to manager over HTTP
-- Manager pumps `MemoryEventBus` → SSE hub; API subscribes via `sse.Client`
+- Manager pumps `MemoryBridge` → SSE hub; API subscribes via `sse.Client`
 - `gRPCDispatcher`: maintains persistent bidirectional gRPC streams with workers; `Dispatch` sends tasks over stream
 - `gRPCConsumer`: connects via gRPC, receives tasks and sends events bidirectionally
 - Store: `MemoryStore` (manager-local); Backpressure: HTTP 503 if no workers; Deadline loop: disabled
@@ -118,7 +118,7 @@ Browser ──POST /tasks──► nginx ──► API replica (:8080) ──►
                                        │                                                                       │ NATSDispatcher.Dispatch
 Browser ◄── GET /events ◄── NATS sub (task.events.*) ──────────────────────┐               JetStream (tasks.new)
                                       (direct, no hub pump)                 │                       │
-                                                                      NATSEventBus              │
+                                                                      NATSBridge                │
                                                                             ▲                   │
                                                                             │              Worker NATSConsumer.Receive()
                                                                             │              exec.Run → Emit → worker.events.<id>
@@ -128,7 +128,7 @@ Browser ◄── GET /events ◄── NATS sub (task.events.*) ─────
                                     └───────────────────────────────────────────────────────────────┘
 ```
 
-- API replicas are thin proxies; Manager owns NATS, postgres, `NATSEventBus`
+- API replicas are thin proxies; Manager owns NATS, postgres, `NATSBridge`
 - APIs subscribe directly to NATS `task.events.*` (no SSE hub needed); Manager republishes to this bus after processing worker events.
 - Store: `pgstore.Store` (PostgreSQL — shared across replicas); Deadline: 30 s re-dispatch
 - NATS used for both queueing (JetStream tasks.new) and event streaming (Core worker.events.* and task.events.*)
