@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -12,31 +13,63 @@ func TestSingleTask(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	id := postTask(t, "e2e-single", 3)
+	const stageCount = 3
+
+	// Connect SSE BEFORE submitting task to avoid missing events
+	events := SSEClient(ctx, t, "")
+	t.Log("SSE connected (global stream)")
+
+	id := postTask(t, "e2e-single", stageCount)
 	t.Logf("submitted task %s", id)
 
-	events := SSEClient(ctx, t, id)
-
-	progressSeen := false
+	eventCounts := make(map[string]int)
+	seenEvents := make(map[string]bool) // for duplicate detection
 	taskDone := false
 
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timeout: progressSeen=%v, taskDone=%v", progressSeen, taskDone)
+			t.Fatalf("timeout: event counts=%v", eventCounts)
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed unexpectedly")
 			}
-			if ev.Type == "progress" {
-				progressSeen = true
-				t.Logf("progress: %d%% (stage: %s)", ev.Progress, ev.StageName)
+			// Filter to our task only
+			if ev.TaskID != id {
+				continue
 			}
+
+			// Create unique event signature for duplicate detection
+			eventSig := fmt.Sprintf("%s:%s:%d:%s", ev.Type, ev.Status, ev.Progress, ev.StageName)
+			if seenEvents[eventSig] {
+				t.Errorf("DUPLICATE event detected: %s", eventSig)
+			}
+			seenEvents[eventSig] = true
+
+			eventCounts[ev.Type]++
+			t.Logf("event: type=%s status=%s progress=%d stage=%s", ev.Type, ev.Status, ev.Progress, ev.StageName)
+
 			if ev.Type == "task_status" && ev.Status == "completed" {
 				taskDone = true
 				t.Log("task completed")
 			}
-			if taskDone && progressSeen {
+			if taskDone {
+				// Verify expected event counts
+				// Executor emits 2 progress events per stage (start + complete)
+				expectedProgress := stageCount * 2
+				// Executor emits 2 status events (running, completed)
+				expectedStatus := 2
+
+				progressCount := eventCounts["progress"]
+				statusCount := eventCounts["task_status"]
+
+				if progressCount != expectedProgress {
+					t.Errorf("expected %d progress events, got %d", expectedProgress, progressCount)
+				}
+				if statusCount != expectedStatus {
+					t.Errorf("expected %d task_status events, got %d", expectedStatus, statusCount)
+				}
+				t.Logf("event counts verified: progress=%d, task_status=%d", progressCount, statusCount)
 				return
 			}
 		}
@@ -46,37 +79,20 @@ func TestSingleTask(t *testing.T) {
 // TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
 func TestConcurrentTasks(t *testing.T) {
 	const numTasks = 3
+	const stageCount = 3
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	// Submit all tasks first, then open per-task SSE connections.
+	// Connect SSE BEFORE submitting tasks
+	events := SSEClient(ctx, t, "")
+	t.Log("SSE connected (global stream)")
+
+	// Submit all tasks
 	ids := make([]string, numTasks)
 	for i := range ids {
-		ids[i] = postTask(t, "e2e-concurrent", 3)
+		ids[i] = postTask(t, "e2e-concurrent", stageCount)
 	}
 	t.Logf("submitted %d tasks: %v", numTasks, ids)
-
-	// Fan-in all per-task SSE streams into a single merged channel.
-	merged := make(chan SSEEvent, 256)
-	var wg sync.WaitGroup
-	for _, id := range ids {
-		wg.Add(1)
-		go func(taskID string) {
-			defer wg.Done()
-			ch := SSEClient(ctx, t, taskID)
-			for ev := range ch {
-				select {
-				case merged <- ev:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(id)
-	}
-	go func() {
-		wg.Wait()
-		close(merged)
-	}()
 
 	idSet := make(map[string]bool)
 	for _, id := range ids {
@@ -84,6 +100,8 @@ func TestConcurrentTasks(t *testing.T) {
 	}
 
 	completed := make(map[string]bool)
+	eventCounts := make(map[string]map[string]int) // taskID -> eventType -> count
+	seenEvents := make(map[string]bool)            // for duplicate detection across all tasks
 	var mu sync.Mutex
 
 	for {
@@ -91,33 +109,71 @@ func TestConcurrentTasks(t *testing.T) {
 		case <-ctx.Done():
 			mu.Lock()
 			t.Fatalf("timeout: only %d/%d tasks completed", len(completed), numTasks)
-		case ev, ok := <-merged:
+		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed unexpectedly")
 			}
 			if !idSet[ev.TaskID] {
 				continue
 			}
+
+			mu.Lock()
+			// Create unique event signature for duplicate detection
+			eventSig := fmt.Sprintf("%s:%s:%s:%d:%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
+			if seenEvents[eventSig] {
+				t.Errorf("DUPLICATE event detected: %s", eventSig)
+			}
+			seenEvents[eventSig] = true
+
+			// Track event counts per task
+			if eventCounts[ev.TaskID] == nil {
+				eventCounts[ev.TaskID] = make(map[string]int)
+			}
+			eventCounts[ev.TaskID][ev.Type]++
+
 			if ev.Type == "task_status" && ev.Status == "completed" {
-				mu.Lock()
 				completed[ev.TaskID] = true
 				done := len(completed)
-				mu.Unlock()
 				t.Logf("task %s completed (%d/%d)", ev.TaskID, done, numTasks)
+
+				// Verify event counts for this completed task
+				// Executor emits 2 progress events per stage (start + complete)
+				expectedProgress := stageCount * 2
+				// Executor emits 2 status events (running, completed)
+				expectedStatus := 2
+
+				progressCount := eventCounts[ev.TaskID]["progress"]
+				statusCount := eventCounts[ev.TaskID]["task_status"]
+				if progressCount != expectedProgress {
+					t.Errorf("task %s: expected %d progress events, got %d", ev.TaskID, expectedProgress, progressCount)
+				}
+				if statusCount != expectedStatus {
+					t.Errorf("task %s: expected %d task_status events, got %d", ev.TaskID, expectedStatus, statusCount)
+				}
+
 				if done == numTasks {
+					mu.Unlock()
+					t.Logf("all tasks completed with correct event counts")
 					return
 				}
 			}
+			mu.Unlock()
 		}
 	}
 }
 
-// TestStatusTransitions verifies the task goes through pending → running → completed.
+// TestStatusTransitions verifies the task emits SSE status events: running → completed.
 func TestStatusTransitions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	id := postTask(t, "e2e-transitions", 2)
+	const stageCount = 2
+
+	// Connect SSE BEFORE submitting task
+	events := SSEClient(ctx, t, "")
+	t.Log("SSE connected (global stream)")
+
+	id := postTask(t, "e2e-transitions", stageCount)
 	t.Logf("submitted task %s", id)
 
 	// Immediately check pending (task may have been picked up already)
@@ -126,20 +182,70 @@ func TestStatusTransitions(t *testing.T) {
 		t.Errorf("expected pending or running immediately after submit, got %s", task.Status)
 	}
 
-	events := SSEClient(ctx, t, id)
+	statusSequence := []string{}
+	eventCounts := make(map[string]int)
+	seenEvents := make(map[string]bool)
 
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatal("timeout waiting for completed status")
+			t.Fatalf("timeout: status sequence=%v, event counts=%v", statusSequence, eventCounts)
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatal("SSE stream closed")
 			}
-			// running is SSE-only (UI signal); skip store check to avoid the
-			// race where the event fires before the client connects.
+			// Filter to our task only
+			if ev.TaskID != id {
+				continue
+			}
+
+			// Create unique event signature for duplicate detection
+			eventSig := fmt.Sprintf("%s:%s:%d:%s", ev.Type, ev.Status, ev.Progress, ev.StageName)
+			if seenEvents[eventSig] {
+				t.Errorf("DUPLICATE event detected: %s", eventSig)
+			}
+			seenEvents[eventSig] = true
+
+			eventCounts[ev.Type]++
+
+			// Track status transitions
+			if ev.Type == "task_status" {
+				statusSequence = append(statusSequence, ev.Status)
+				t.Logf("status transition: %s", ev.Status)
+			}
+
 			if ev.Type == "task_status" && ev.Status == "completed" {
 				t.Log("saw completed status")
+
+				// Verify expected status sequence: running → completed
+				// Note: pending is never emitted as an SSE event (only stored in DB)
+				expectedSeq := []string{"running", "completed"}
+				if len(statusSequence) != len(expectedSeq) {
+					t.Errorf("expected status sequence %v, got %v", expectedSeq, statusSequence)
+				} else {
+					for i, expected := range expectedSeq {
+						if statusSequence[i] != expected {
+							t.Errorf("status sequence mismatch at index %d: expected %s, got %s", i, expected, statusSequence[i])
+						}
+					}
+				}
+
+				// Verify event counts
+				// Executor emits 2 progress events per stage (start + complete)
+				expectedProgress := stageCount * 2
+				// Executor emits 2 status events (running, completed)
+				expectedStatus := 2
+
+				progressCount := eventCounts["progress"]
+				statusCount := eventCounts["task_status"]
+				if progressCount != expectedProgress {
+					t.Errorf("expected %d progress events, got %d", expectedProgress, progressCount)
+				}
+				if statusCount != expectedStatus {
+					t.Errorf("expected %d task_status events, got %d", expectedStatus, statusCount)
+				}
+
+				// Verify final state in storage
 				task := getTask(t, id)
 				if task.Status != "completed" {
 					t.Errorf("GET /tasks/:id: expected status=completed, got %s", task.Status)
@@ -157,6 +263,8 @@ func TestStatusTransitions(t *testing.T) {
 				} else if found.Status != "completed" {
 					t.Errorf("GET /tasks: expected status=completed, got %s", found.Status)
 				}
+
+				t.Logf("event counts verified: progress=%d, task_status=%d", progressCount, statusCount)
 				return
 			}
 		}
