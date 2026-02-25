@@ -1,4 +1,4 @@
-<!-- Commit: 420cf39768fa36462d2c9db9a5c29f67dba10086 | Files scanned: 16 | Token estimate: ~650 -->
+<!-- Commit: 89762b6ad78261bca293b1d2e9647ae44ef352b6 | Files scanned: 16 | Token estimate: ~650 -->
 
 # Dependencies & Configuration
 
@@ -33,33 +33,33 @@ All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `d
 
 ### Pattern 1 — Single process (no Docker required)
 ```
-[server binary]   ← Dockerfile (single-stage)
+[server binary]   ← patterns/p01/Dockerfile (single-stage)
 make run-p1       ← runs locally without Docker
 ```
 
-### Pattern 2 — Docker Compose (`02-rest-polling`)
+### Pattern 2 — Docker Compose (`patterns/p02`)
 ```
-[manager ×1]   ← Dockerfile.manager  (port 8081, healthcheck /health)
-[api ×1]       ← Dockerfile.api      (port 8080, depends_on manager healthy)
-[worker ×3]    ← Dockerfile.worker   (depends_on manager healthy)
+[manager ×1]   ← patterns/p02/Dockerfile.manager  (port 8081, healthcheck /health)
+[api ×1]       ← patterns/p02/Dockerfile.api      (port 8080, depends_on manager healthy)
+[worker ×3]    ← patterns/p02/Dockerfile.worker   (depends_on manager healthy)
 ```
 Workers and API talk to manager via `http://manager:8081`.
 
-### Pattern 3 — Docker Compose (`03-websocket-hub`)
+### Pattern 3 — Docker Compose (`patterns/p03`)
 ```
-[manager ×1]   ← Dockerfile.manager  (port 8081, healthcheck /health; owns WebSocket hub + MemoryStore)
-[api ×1]       ← Dockerfile.api      (port 8080, depends_on manager healthy; MANAGER_URL=http://manager:8081)
-[worker ×3]    ← Dockerfile.worker   (MANAGER_URL=ws://manager:8081/ws/register)
+[manager ×1]   ← patterns/p03/Dockerfile.manager  (port 8081, healthcheck /health; owns WebSocket hub + MemoryStore)
+[api ×1]       ← patterns/p03/Dockerfile.api      (port 8080, depends_on manager healthy; MANAGER_URL=http://manager:8081)
+[worker ×3]    ← patterns/p03/Dockerfile.worker   (MANAGER_URL=ws://manager:8081/ws/register)
 ```
 Workers connect to Manager (not API) via WebSocket.
 
-### Pattern 4 — Docker Compose (`04-queue-and-store`)
+### Pattern 4 — Docker Compose (`patterns/p04`)
 ```
-[nginx]        ← nginx/nginx.conf   (port 8080 → upstream api)
-  ├─ [api ×3] ← Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
-[manager ×1]   ← Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns NATSEventBus, postgres, SSE hub)
-[worker ×3]    ← Dockerfile.worker
-[nats]         ← nats:latest + nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
+[nginx]        ← patterns/p04/nginx/nginx.conf   (port 8080 → upstream api)
+  ├─ [api ×3] ← patterns/p04/Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
+[manager ×1]   ← patterns/p04/Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns NATSEventBus, postgres, SSE hub)
+[worker ×3]    ← patterns/p04/Dockerfile.worker
+[nats]         ← nats:latest + patterns/p04/nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
                ← named volume: nats-jetstream (persistent across restarts)
 [postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
 ```

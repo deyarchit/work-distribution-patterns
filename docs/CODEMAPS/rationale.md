@@ -1,5 +1,11 @@
 # Codemap Rationale Log
 
+## 89762b6 — 2026-02-24
+Commits: `420cf39..89762b6` (Rename pattern folders, configure repomix, update codemaps)
+
+### Decisions
+- **Rename pattern directories for clarity**: `patterns/01-goroutine-pool` → `patterns/p01`, `patterns/02-rest-polling` → `patterns/p02`, etc. Shorthand names (`p01`, `p02`, `p03`, `p04`) reduce verbosity in Makefiles, Dockerfiles, and documentation while preserving the descriptive names in code comments and codemaps. This mirrors common naming in CLI tools and makes shell history/scripts more readable.
+
 ## 420cf39 — 2026-02-23
 Commits: `0f2a79b..420cf39` (Remove polling; extract event bus abstraction)
 
