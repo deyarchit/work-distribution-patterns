@@ -1,5 +1,4 @@
-.PHONY: run-p1 run-p2 stop-p2 run-p3 stop-p3 run-p4 stop-p4 test-e2e test-load test-all build-all tidy lint fmt
-
+SKILL_NAME = update-codemaps
 BASE_URL ?= http://localhost:8080
 
 ## Run Pattern 1 locally (no Docker)
@@ -92,7 +91,12 @@ lint:
 fmt:
 	golangci-lint fmt ./...
 
-
 ## Update repomap
-update-repomap:
-	npx repomix@latest --include "**/*.go,**/*.md,**/*.yml,**/*.json,Makefile,go.mod" --output docs/repomix-output.xml --style xml --compress
+update-codemaps:
+	@echo "Running repomix to generate static codemap"
+	npx repomix@latest
+	@echo "Launching Claude Code to run skill: $(SKILL_NAME)..."
+	claude --model="haiku" --permission-mode="dontAsk" run the $(SKILL_NAME) skill"
+	@echo "Updated codemaps"
+
+.PHONY: *

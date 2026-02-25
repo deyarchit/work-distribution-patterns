@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Exploring the Project
 
-Codemaps in `docs/CODEMAPS/` are token-efficient summaries — load only the ones relevant to your task and keep them in context throughout. Prefer them over broad file exploration.
+**CRITICAL:** Codemaps in `docs/CODEMAPS/` are the authoritative, token-efficient source of truth for this repository. **Always load the relevant codemaps as your first action** when starting a new task, before performing broad file exploration or grep searches.
 
 | Task type | Codemap(s) to load |
 |---|---|
 | Understanding overall system design, how patterns differ, or data flow | `docs/CODEMAPS/architecture.md` |
+| Deep dive into architectural decisions and trade-offs | `docs/CODEMAPS/rationale.md` |
 | Working on Go backend code: packages, types, interfaces, dispatch, executor | `docs/CODEMAPS/backend.md` |
 | Working on UI, SSE streaming, or HTMX templates | `docs/CODEMAPS/frontend.md` |
 | Adding or auditing external libraries | `docs/CODEMAPS/dependencies.md` |

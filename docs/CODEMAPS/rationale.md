@@ -1,5 +1,15 @@
 # Codemap Rationale Log
 
+## 4751c24 — 2026-02-24
+Commits: `40d4c7d..4751c24` (Fix bug in manager for nats pattern)
+
+### Decisions
+- **Conditional event republishing in Manager**: Added `republishWorkerEvents` flag to `Manager.New()` to control whether worker events are republished to the event bus.
+  - **P1–P3** (`republishWorkerEvents=true`): Use `MemoryEventBus`, which requires explicit republishing of dispatcher events to feed the SSE hub. Without republishing, browser subscribers receive no worker progress/status updates.
+  - **P4** (`republishWorkerEvents=false`): Use `NATSEventBus`, where the dispatcher publishes directly to NATS `task.events.*` and APIs subscribe directly. Republishing to the event bus is redundant — it was incorrectly happening before this fix, causing duplicate event flow.
+
+  This bug fix ensures P4 doesn't duplicate event publication and maintains the correct event flow for each pattern.
+
 ## 89762b6 — 2026-02-24
 Commits: `420cf39..89762b6` (Rename pattern folders, configure repomix, update codemaps)
 
