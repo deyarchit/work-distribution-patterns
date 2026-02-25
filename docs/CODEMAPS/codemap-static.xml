@@ -44,6 +44,23 @@ patterns/
       worker/
         main.go
     internal/
+      grpc/
+        client.go
+        consumer.go
+        converter.go
+        server.go
+    proto/
+      work_grpc.pb.go
+      work.pb.go
+  p05/
+    cmd/
+      api/
+        main.go
+      manager/
+        main.go
+      worker/
+        main.go
+    internal/
       nats/
         consumer.go
         dispatcher.go
@@ -536,7 +553,775 @@ wc.hub.events <- ev // blocking: must not lose terminal status
 // Unknown types (e.g., "ready") are silently ignored.
 </file>
 
-<file path="patterns/p04/cmd/api/main.go">
+<file path="patterns/p04/internal/grpc/client.go">
+package grpc
+import (
+	"context"
+	"errors"
+	"io"
+	"log"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/models"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+⋮----
+"context"
+"errors"
+"io"
+"log"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/models"
+"google.golang.org/grpc"
+"google.golang.org/grpc/credentials/insecure"
+⋮----
+// Client implements contracts.TaskManager using gRPC
+type Client struct {
+	conn   *grpc.ClientConn
+	client pb.TaskManagerClient
+}
+// NewClient creates a new gRPC client for the API
+func NewClient(managerAddr string) (*Client, error)
+// Submit creates a new task
+func (c *Client) Submit(ctx context.Context, task models.Task) error
+// Get retrieves a task by ID
+func (c *Client) Get(ctx context.Context, id string) (models.Task, bool)
+// List returns all tasks
+func (c *Client) List(ctx context.Context) []models.Task
+// Subscribe returns a channel of task events
+func (c *Client) Subscribe(ctx context.Context, taskID string) (<-chan models.TaskEvent, error)
+⋮----
+var tid *string
+⋮----
+// Close closes the gRPC connection
+func (c *Client) Close() error
+</file>
+
+<file path="patterns/p04/internal/grpc/consumer.go">
+package grpc
+import (
+	"context"
+	"errors"
+	"io"
+	"log"
+	"sync"
+	"time"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/models"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+⋮----
+"context"
+"errors"
+"io"
+"log"
+"sync"
+"time"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/models"
+"google.golang.org/grpc"
+"google.golang.org/grpc/credentials/insecure"
+⋮----
+var errNotConnected = errors.New("not connected to manager")
+// Consumer implements contracts.TaskConsumer using gRPC bidirectional streaming
+type Consumer struct {
+	managerAddr string
+	conn        *grpc.ClientConn
+	client      pb.WorkDistributionClient
+	stream      pb.WorkDistribution_ConnectClient
+	mu        sync.Mutex
+	taskQueue chan models.Task
+	connected bool
+}
+// NewConsumer creates a new gRPC consumer
+func NewConsumer(managerAddr string) *Consumer
+// Connect establishes a gRPC connection and starts the bidirectional stream
+func (c *Consumer) Connect(ctx context.Context) error
+⋮----
+// Retry loop with backoff
+⋮----
+// Start receiving tasks
+⋮----
+// connect establishes the gRPC connection and stream
+func (c *Consumer) connect(ctx context.Context) error
+⋮----
+// Connect to manager
+⋮----
+// Start bidirectional stream
+⋮----
+// receiveLoop receives tasks from the stream and queues them
+func (c *Consumer) receiveLoop(ctx context.Context)
+⋮----
+// Convert and queue task
+⋮----
+// Receive returns the next task from the queue (blocks)
+func (c *Consumer) Receive(ctx context.Context) (models.Task, error)
+// Emit sends an event to the manager
+func (c *Consumer) Emit(ctx context.Context, event models.TaskEvent) error
+// Close closes the gRPC connection
+func (c *Consumer) Close() error
+</file>
+
+<file path="patterns/p04/internal/grpc/converter.go">
+package grpc
+import (
+	"time"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"time"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/models"
+⋮----
+// TaskToProto converts models.Task to proto.Task
+func TaskToProto(t models.Task) *pb.Task
+// ProtoToTask converts proto.Task to models.Task
+func ProtoToTask(pt *pb.Task) models.Task
+⋮----
+var dispatchedAt, completedAt *time.Time
+⋮----
+// EventToProto converts models.TaskEvent to proto.TaskEvent
+func EventToProto(e models.TaskEvent) *pb.TaskEvent
+// ProtoToEvent converts proto.TaskEvent to models.TaskEvent
+func ProtoToEvent(pe *pb.TaskEvent) models.TaskEvent
+</file>
+
+<file path="patterns/p04/internal/grpc/server.go">
+package grpc
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"sync"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+⋮----
+"context"
+"errors"
+"fmt"
+"io"
+"log"
+"sync"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/store"
+"google.golang.org/grpc/codes"
+"google.golang.org/grpc/status"
+⋮----
+// Server implements both WorkDistributionServer and TaskManagerServer
+type Server struct {
+	pb.UnimplementedWorkDistributionServer
+	pb.UnimplementedTaskManagerServer
+	store    store.TaskStore
+	eventBus events.TaskEventBus
+	// Worker management
+	mu             sync.RWMutex
+	workerStreams  map[string]pb.WorkDistribution_ConnectServer
+	availableQueue chan string // worker IDs
+	pendingTasks   chan models.Task
+	// Event subscriptions
+	subMu       sync.RWMutex
+	subscribers map[string]chan models.TaskEvent
+	nextSubID   int
+	// Events from workers (for manager's event loop)
+	workerEvents chan models.TaskEvent
+}
+⋮----
+// Worker management
+⋮----
+availableQueue chan string // worker IDs
+⋮----
+// Event subscriptions
+⋮----
+// Events from workers (for manager's event loop)
+⋮----
+// NewServer creates a new gRPC server
+func NewServer(st store.TaskStore, evBus events.TaskEventBus) *Server
+// Start begins background goroutines for dispatching and event broadcasting
+func (s *Server) Start(ctx context.Context)
+// dispatchLoop sends pending tasks to available workers
+func (s *Server) dispatchLoop(ctx context.Context)
+⋮----
+// Wait for an available worker
+⋮----
+// Worker disconnected, re-queue task
+⋮----
+// Send task to worker
+⋮----
+// Worker failed, re-queue task and remove worker
+⋮----
+// eventBroadcastLoop forwards events from eventBus to gRPC subscribers
+func (s *Server) eventBroadcastLoop(ctx context.Context)
+⋮----
+// Subscriber can't keep up, skip
+⋮----
+// removeWorker removes a worker from the pool
+func (s *Server) removeWorker(workerID string)
+// WorkDistribution.Connect - bidirectional stream for worker connection
+func (s *Server) Connect(stream pb.WorkDistribution_ConnectServer) error
+⋮----
+// Generate worker ID
+⋮----
+// Register worker
+⋮----
+// Signal worker is available
+⋮----
+// Handle incoming events from worker
+⋮----
+// Convert and forward event to manager's event loop
+⋮----
+// For terminal events, mark worker as available again
+⋮----
+// Worker finished a task, mark as available
+⋮----
+// Queue full, skip
+⋮----
+// TaskManager.Submit - creates a new task
+func (s *Server) Submit(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitResponse, error)
+⋮----
+// Store task
+⋮----
+// Enqueue for dispatch
+⋮----
+// TaskManager.Get - retrieves a task by ID
+func (s *Server) Get(_ context.Context, req *pb.GetRequest) (*pb.GetResponse, error)
+// TaskManager.List - returns all tasks
+func (s *Server) List(_ context.Context, _ *pb.ListRequest) (*pb.ListResponse, error)
+// TaskManager.Subscribe - streams events to API clients
+func (s *Server) Subscribe(req *pb.SubscribeRequest, stream pb.TaskManager_SubscribeServer) error
+⋮----
+// Generate subscription ID
+⋮----
+// Stream events
+⋮----
+// Filter by task ID if specified
+⋮----
+// GRPCDispatcher implements contracts.TaskDispatcher for the Manager
+type GRPCDispatcher struct {
+	server *Server
+}
+// NewDispatcher creates a new GRPCDispatcher
+func NewDispatcher(server *Server) *GRPCDispatcher
+// Start starts the dispatcher (called by manager.Manager)
+⋮----
+// Dispatch enqueues a task for workers
+func (d *GRPCDispatcher) Dispatch(ctx context.Context, task models.Task) error
+// ReceiveEvent returns events from workers (blocks until event is available)
+func (d *GRPCDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+</file>
+
+<file path="patterns/p04/proto/work_grpc.pb.go">
+// Code generated by protoc-gen-go-grpc. DO NOT EDIT.
+// versions:
+// - protoc-gen-go-grpc v1.6.1
+// - protoc             v6.33.4
+// source: patterns/p04/proto/work.proto
+package gen
+import (
+	context "context"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
+)
+⋮----
+context "context"
+grpc "google.golang.org/grpc"
+codes "google.golang.org/grpc/codes"
+status "google.golang.org/grpc/status"
+⋮----
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the grpc package it is being compiled against.
+// Requires gRPC-Go v1.64.0 or later.
+const _ = grpc.SupportPackageIsVersion9
+const (
+	WorkDistribution_Connect_FullMethodName = "/work.WorkDistribution/Connect"
+)
+// WorkDistributionClient is the client API for WorkDistribution service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+⋮----
+// WorkDistribution service: Manager -> Worker bidirectional streaming
+type WorkDistributionClient interface {
+	// Connect establishes a bidirectional stream between Manager and Worker
+	// Manager sends Tasks down; Worker sends TaskEvents up
+	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TaskEvent, Task], error)
+}
+⋮----
+// Connect establishes a bidirectional stream between Manager and Worker
+// Manager sends Tasks down; Worker sends TaskEvents up
+⋮----
+type workDistributionClient struct {
+	cc grpc.ClientConnInterface
+}
+func NewWorkDistributionClient(cc grpc.ClientConnInterface) WorkDistributionClient
+func (c *workDistributionClient) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TaskEvent, Task], error)
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+⋮----
+// WorkDistributionServer is the server API for WorkDistribution service.
+// All implementations must embed UnimplementedWorkDistributionServer
+// for forward compatibility.
+⋮----
+type WorkDistributionServer interface {
+	// Connect establishes a bidirectional stream between Manager and Worker
+	// Manager sends Tasks down; Worker sends TaskEvents up
+	Connect(grpc.BidiStreamingServer[TaskEvent, Task]) error
+	mustEmbedUnimplementedWorkDistributionServer()
+}
+// UnimplementedWorkDistributionServer must be embedded to have
+// forward compatible implementations.
+⋮----
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedWorkDistributionServer struct{}
+⋮----
+func (UnimplementedWorkDistributionServer) mustEmbedUnimplementedWorkDistributionServer()
+func (UnimplementedWorkDistributionServer) testEmbeddedByValue()
+// UnsafeWorkDistributionServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to WorkDistributionServer will
+// result in compilation errors.
+type UnsafeWorkDistributionServer interface {
+	mustEmbedUnimplementedWorkDistributionServer()
+}
+func RegisterWorkDistributionServer(s grpc.ServiceRegistrar, srv WorkDistributionServer)
+⋮----
+// If the following call panics, it indicates UnimplementedWorkDistributionServer was
+// embedded by pointer and is nil.  This will cause panics if an
+// unimplemented method is ever invoked, so we test this at initialization
+// time to prevent it from happening at runtime later due to I/O.
+⋮----
+func _WorkDistribution_Connect_Handler(srv interface
+⋮----
+// WorkDistribution_ServiceDesc is the grpc.ServiceDesc for WorkDistribution service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var WorkDistribution_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "work.WorkDistribution",
+	HandlerType: (*WorkDistributionServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Connect",
+			Handler:       _WorkDistribution_Connect_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "patterns/p04/proto/work.proto",
+}
+const (
+	TaskManager_Submit_FullMethodName    = "/work.TaskManager/Submit"
+	TaskManager_Get_FullMethodName       = "/work.TaskManager/Get"
+	TaskManager_List_FullMethodName      = "/work.TaskManager/List"
+	TaskManager_Subscribe_FullMethodName = "/work.TaskManager/Subscribe"
+)
+// TaskManagerClient is the client API for TaskManager service.
+⋮----
+// TaskManager service: API -> Manager
+type TaskManagerClient interface {
+	// Submit creates a new task
+	Submit(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
+	// Get retrieves a task by ID
+	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
+	// List returns all tasks
+	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	// Subscribe streams events for a specific task or all tasks
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
+}
+⋮----
+// Submit creates a new task
+⋮----
+// Get retrieves a task by ID
+⋮----
+// List returns all tasks
+⋮----
+// Subscribe streams events for a specific task or all tasks
+⋮----
+type taskManagerClient struct {
+	cc grpc.ClientConnInterface
+}
+func NewTaskManagerClient(cc grpc.ClientConnInterface) TaskManagerClient
+func (c *taskManagerClient) Submit(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
+func (c *taskManagerClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
+func (c *taskManagerClient) List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+func (c *taskManagerClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
+⋮----
+// TaskManagerServer is the server API for TaskManager service.
+// All implementations must embed UnimplementedTaskManagerServer
+⋮----
+type TaskManagerServer interface {
+	// Submit creates a new task
+	Submit(context.Context, *SubmitRequest) (*SubmitResponse, error)
+	// Get retrieves a task by ID
+	Get(context.Context, *GetRequest) (*GetResponse, error)
+	// List returns all tasks
+	List(context.Context, *ListRequest) (*ListResponse, error)
+	// Subscribe streams events for a specific task or all tasks
+	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[TaskEvent]) error
+	mustEmbedUnimplementedTaskManagerServer()
+}
+// UnimplementedTaskManagerServer must be embedded to have
+⋮----
+type UnimplementedTaskManagerServer struct{}
+⋮----
+func (UnimplementedTaskManagerServer) mustEmbedUnimplementedTaskManagerServer()
+⋮----
+// UnsafeTaskManagerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TaskManagerServer will
+⋮----
+type UnsafeTaskManagerServer interface {
+	mustEmbedUnimplementedTaskManagerServer()
+}
+func RegisterTaskManagerServer(s grpc.ServiceRegistrar, srv TaskManagerServer)
+⋮----
+// If the following call panics, it indicates UnimplementedTaskManagerServer was
+⋮----
+func _TaskManager_Submit_Handler(srv interface
+func _TaskManager_Get_Handler(srv interface
+func _TaskManager_List_Handler(srv interface
+func _TaskManager_Subscribe_Handler(srv interface
+⋮----
+// TaskManager_ServiceDesc is the grpc.ServiceDesc for TaskManager service.
+⋮----
+var TaskManager_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "work.TaskManager",
+	HandlerType: (*TaskManagerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Submit",
+			Handler:    _TaskManager_Submit_Handler,
+		},
+		{
+			MethodName: "Get",
+			Handler:    _TaskManager_Get_Handler,
+		},
+		{
+			MethodName: "List",
+			Handler:    _TaskManager_List_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Subscribe",
+			Handler:       _TaskManager_Subscribe_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "patterns/p04/proto/work.proto",
+}
+</file>
+
+<file path="patterns/p04/proto/work.pb.go">
+// Code generated by protoc-gen-go. DO NOT EDIT.
+// versions:
+// 	protoc-gen-go v1.36.11
+// 	protoc        v6.33.4
+// source: patterns/p04/proto/work.proto
+package gen
+import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
+)
+⋮----
+protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+reflect "reflect"
+sync "sync"
+unsafe "unsafe"
+⋮----
+const (
+	// Verify that this generated code is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
+⋮----
+// Verify that this generated code is sufficiently up-to-date.
+⋮----
+// Verify that runtime/protoimpl is sufficiently up-to-date.
+⋮----
+// Stage represents a single processing step within a task
+type Stage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	DurationMs    int32                  `protobuf:"varint,2,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Error         *string                `protobuf:"bytes,4,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+func (x *Stage) Reset()
+func (x *Stage) String() string
+func (*Stage) ProtoMessage()
+func (x *Stage) ProtoReflect() protoreflect.Message
+// Deprecated: Use Stage.ProtoReflect.Descriptor instead.
+func (*Stage) Descriptor() ([]byte, []int)
+func (x *Stage) GetName() string
+func (x *Stage) GetDurationMs() int32
+func (x *Stage) GetStatus() string
+func (x *Stage) GetError() string
+// Task represents a work item
+type Task struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Stages        []*Stage               `protobuf:"bytes,4,rep,name=stages,proto3" json:"stages,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     int64                  `protobuf:"varint,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use Task.ProtoReflect.Descriptor instead.
+⋮----
+func (x *Task) GetId() string
+func (x *Task) GetTitle() string
+⋮----
+func (x *Task) GetStages() []*Stage
+func (x *Task) GetCreatedAt() int64
+func (x *Task) GetUpdatedAt() int64
+// TaskEvent represents a status update or progress event
+type TaskEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	EventType     string                 `protobuf:"bytes,2,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	StageName     *string                `protobuf:"bytes,4,opt,name=stage_name,json=stageName,proto3,oneof" json:"stage_name,omitempty"`
+	Progress      *int32                 `protobuf:"varint,5,opt,name=progress,proto3,oneof" json:"progress,omitempty"`
+	Error         *string                `protobuf:"bytes,6,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,7,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use TaskEvent.ProtoReflect.Descriptor instead.
+⋮----
+func (x *TaskEvent) GetTaskId() string
+func (x *TaskEvent) GetEventType() string
+⋮----
+func (x *TaskEvent) GetStageName() string
+func (x *TaskEvent) GetProgress() int32
+⋮----
+func (x *TaskEvent) GetTimestamp() int64
+// Request/Response messages for TaskManager service (API -> Manager)
+type SubmitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Task          *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use SubmitRequest.ProtoReflect.Descriptor instead.
+⋮----
+func (x *SubmitRequest) GetTask() *Task
+type SubmitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use SubmitResponse.ProtoReflect.Descriptor instead.
+⋮----
+type GetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
+⋮----
+type GetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Task          *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	Found         bool                   `protobuf:"varint,2,opt,name=found,proto3" json:"found,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
+⋮----
+func (x *GetResponse) GetFound() bool
+type ListRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use ListRequest.ProtoReflect.Descriptor instead.
+⋮----
+type ListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tasks         []*Task                `protobuf:"bytes,1,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+// Deprecated: Use ListResponse.ProtoReflect.Descriptor instead.
+⋮----
+func (x *ListResponse) GetTasks() []*Task
+type SubscribeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        *string                `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3,oneof" json:"task_id,omitempty"` // Empty for global subscription
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+⋮----
+TaskId        *string                `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3,oneof" json:"task_id,omitempty"` // Empty for global subscription
+⋮----
+// Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
+⋮----
+var File_patterns_p04_proto_work_proto protoreflect.FileDescriptor
+const file_patterns_p04_proto_work_proto_rawDesc = "" +
+	"\n" +
+	"\x1dpatterns/p04/proto/work.proto\x12\x04work\"y\n" +
+	"\x05Stage\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
+	"\vduration_ms\x18\x02 \x01(\x05R\n" +
+	"durationMs\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x19\n" +
+	"\x05error\x18\x04 \x01(\tH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x06_error\"\xa7\x01\n" +
+	"\x04Task\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12#\n" +
+	"\x06stages\x18\x04 \x03(\v2\v.work.StageR\x06stages\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03R\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\"\xff\x01\n" +
+	"\tTaskEvent\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x02 \x01(\tR\teventType\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\"\n" +
+	"\n" +
+	"stage_name\x18\x04 \x01(\tH\x00R\tstageName\x88\x01\x01\x12\x1f\n" +
+	"\bprogress\x18\x05 \x01(\x05H\x01R\bprogress\x88\x01\x01\x12\x19\n" +
+	"\x05error\x18\x06 \x01(\tH\x02R\x05error\x88\x01\x01\x12\x1c\n" +
+	"\ttimestamp\x18\a \x01(\x03R\ttimestampB\r\n" +
+	"\v_stage_nameB\v\n" +
+	"\t_progressB\b\n" +
+	"\x06_error\"/\n" +
+	"\rSubmitRequest\x12\x1e\n" +
+	"\x04task\x18\x01 \x01(\v2\n" +
+	".work.TaskR\x04task\"\x10\n" +
+	"\x0eSubmitResponse\"%\n" +
+	"\n" +
+	"GetRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"C\n" +
+	"\vGetResponse\x12\x1e\n" +
+	"\x04task\x18\x01 \x01(\v2\n" +
+	".work.TaskR\x04task\x12\x14\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\"\r\n" +
+	"\vListRequest\"0\n" +
+	"\fListResponse\x12 \n" +
+	"\x05tasks\x18\x01 \x03(\v2\n" +
+	".work.TaskR\x05tasks\"<\n" +
+	"\x10SubscribeRequest\x12\x1c\n" +
+	"\atask_id\x18\x01 \x01(\tH\x00R\x06taskId\x88\x01\x01B\n" +
+	"\n" +
+	"\b_task_id2>\n" +
+	"\x10WorkDistribution\x12*\n" +
+	"\aConnect\x12\x0f.work.TaskEvent\x1a\n" +
+	".work.Task(\x010\x012\xd5\x01\n" +
+	"\vTaskManager\x123\n" +
+	"\x06Submit\x12\x13.work.SubmitRequest\x1a\x14.work.SubmitResponse\x12*\n" +
+	"\x03Get\x12\x10.work.GetRequest\x1a\x11.work.GetResponse\x12-\n" +
+	"\x04List\x12\x11.work.ListRequest\x1a\x12.work.ListResponse\x126\n" +
+	"\tSubscribe\x12\x16.work.SubscribeRequest\x1a\x0f.work.TaskEvent0\x01B7Z5work-distribution-patterns/patterns/p04/proto/gen;genb\x06proto3"
+var (
+	file_patterns_p04_proto_work_proto_rawDescOnce sync.Once
+	file_patterns_p04_proto_work_proto_rawDescData []byte
+)
+func file_patterns_p04_proto_work_proto_rawDescGZIP() []byte
+var file_patterns_p04_proto_work_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_patterns_p04_proto_work_proto_goTypes = []any{
+	(*Stage)(nil),            // 0: work.Stage
+	(*Task)(nil),             // 1: work.Task
+	(*TaskEvent)(nil),        // 2: work.TaskEvent
+	(*SubmitRequest)(nil),    // 3: work.SubmitRequest
+	(*SubmitResponse)(nil),   // 4: work.SubmitResponse
+	(*GetRequest)(nil),       // 5: work.GetRequest
+	(*GetResponse)(nil),      // 6: work.GetResponse
+	(*ListRequest)(nil),      // 7: work.ListRequest
+	(*ListResponse)(nil),     // 8: work.ListResponse
+	(*SubscribeRequest)(nil), // 9: work.SubscribeRequest
+}
+⋮----
+(*Stage)(nil),            // 0: work.Stage
+(*Task)(nil),             // 1: work.Task
+(*TaskEvent)(nil),        // 2: work.TaskEvent
+(*SubmitRequest)(nil),    // 3: work.SubmitRequest
+(*SubmitResponse)(nil),   // 4: work.SubmitResponse
+(*GetRequest)(nil),       // 5: work.GetRequest
+(*GetResponse)(nil),      // 6: work.GetResponse
+(*ListRequest)(nil),      // 7: work.ListRequest
+(*ListResponse)(nil),     // 8: work.ListResponse
+(*SubscribeRequest)(nil), // 9: work.SubscribeRequest
+⋮----
+var file_patterns_p04_proto_work_proto_depIdxs = []int32{
+	0, // 0: work.Task.stages:type_name -> work.Stage
+	1, // 1: work.SubmitRequest.task:type_name -> work.Task
+	1, // 2: work.GetResponse.task:type_name -> work.Task
+	1, // 3: work.ListResponse.tasks:type_name -> work.Task
+	2, // 4: work.WorkDistribution.Connect:input_type -> work.TaskEvent
+	3, // 5: work.TaskManager.Submit:input_type -> work.SubmitRequest
+	5, // 6: work.TaskManager.Get:input_type -> work.GetRequest
+	7, // 7: work.TaskManager.List:input_type -> work.ListRequest
+	9, // 8: work.TaskManager.Subscribe:input_type -> work.SubscribeRequest
+	1, // 9: work.WorkDistribution.Connect:output_type -> work.Task
+	4, // 10: work.TaskManager.Submit:output_type -> work.SubmitResponse
+	6, // 11: work.TaskManager.Get:output_type -> work.GetResponse
+	8, // 12: work.TaskManager.List:output_type -> work.ListResponse
+	2, // 13: work.TaskManager.Subscribe:output_type -> work.TaskEvent
+	9, // [9:14] is the sub-list for method output_type
+	4, // [4:9] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
+}
+⋮----
+0, // 0: work.Task.stages:type_name -> work.Stage
+1, // 1: work.SubmitRequest.task:type_name -> work.Task
+1, // 2: work.GetResponse.task:type_name -> work.Task
+1, // 3: work.ListResponse.tasks:type_name -> work.Task
+2, // 4: work.WorkDistribution.Connect:input_type -> work.TaskEvent
+3, // 5: work.TaskManager.Submit:input_type -> work.SubmitRequest
+5, // 6: work.TaskManager.Get:input_type -> work.GetRequest
+7, // 7: work.TaskManager.List:input_type -> work.ListRequest
+9, // 8: work.TaskManager.Subscribe:input_type -> work.SubscribeRequest
+1, // 9: work.WorkDistribution.Connect:output_type -> work.Task
+4, // 10: work.TaskManager.Submit:output_type -> work.SubmitResponse
+6, // 11: work.TaskManager.Get:output_type -> work.GetResponse
+8, // 12: work.TaskManager.List:output_type -> work.ListResponse
+2, // 13: work.TaskManager.Subscribe:output_type -> work.TaskEvent
+9, // [9:14] is the sub-list for method output_type
+4, // [4:9] is the sub-list for method input_type
+4, // [4:4] is the sub-list for extension type_name
+4, // [4:4] is the sub-list for extension extendee
+0, // [0:4] is the sub-list for field type_name
+⋮----
+func init()
+func file_patterns_p04_proto_work_proto_init()
+⋮----
+type x struct{}
+</file>
+
+<file path="patterns/p05/cmd/api/main.go">
 package main
 import (
 	"context"
@@ -574,7 +1359,68 @@ var cfg config
 // Subscribe directly to NATS for events (distributed pub/sub).
 </file>
 
-<file path="patterns/p04/cmd/worker/main.go">
+<file path="patterns/p05/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go"
+	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"github.com/nats-io/nats.go"
+natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second, false) // republishWorkerEvents=false; API subscribes directly to NATS
+⋮----
+// Build the router manually — the manager accepts a fully-formed Task
+// (pre-created by the API with models.NewTask) rather than a submit request.
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p05/cmd/worker/main.go">
 package main
 import (
 	"context"
@@ -584,7 +1430,7 @@ import (
 	"time"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
-	natsinternal "work-distribution-patterns/patterns/p04/internal/nats"
+	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
 	"work-distribution-patterns/shared/executor"
 )
 ⋮----
@@ -595,7 +1441,7 @@ import (
 "time"
 "github.com/kelseyhightower/envconfig"
 "github.com/nats-io/nats.go"
-natsinternal "work-distribution-patterns/patterns/p04/internal/nats"
+natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
 "work-distribution-patterns/shared/executor"
 ⋮----
 type config struct {
@@ -611,7 +1457,7 @@ var cfg config
 // the task is delivered to Receive).
 </file>
 
-<file path="patterns/p04/internal/nats/consumer.go">
+<file path="patterns/p05/internal/nats/consumer.go">
 package natsinternal
 import (
 	"context"
@@ -659,7 +1505,7 @@ func (s *NATSConsumer) Receive(ctx context.Context) (models.Task, error)
 func (s *NATSConsumer) Emit(_ context.Context, event models.TaskEvent) error
 </file>
 
-<file path="patterns/p04/internal/nats/dispatcher.go">
+<file path="patterns/p05/internal/nats/dispatcher.go">
 package natsinternal
 import (
 	"context"
@@ -704,7 +1550,7 @@ func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error
 func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 </file>
 
-<file path="patterns/p04/internal/nats/setup.go">
+<file path="patterns/p05/internal/nats/setup.go">
 package natsinternal
 import (
 	"log"
@@ -724,7 +1570,7 @@ const (
 func SetupJetStream(js nats.JetStreamContext) error
 </file>
 
-<file path="patterns/p04/internal/postgres/store.go">
+<file path="patterns/p05/internal/postgres/store.go">
 package pgstore
 import (
 	"context"
@@ -1013,65 +1859,70 @@ var task models.Task
 // Worker WebSocket registration — workers connect here to receive tasks.
 </file>
 
-<file path="patterns/p04/cmd/manager/main.go">
+<file path="patterns/p04/cmd/api/main.go">
 package main
 import (
 	"context"
 	"html/template"
 	"log"
-	"net/http"
-	"time"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"github.com/nats-io/nats.go"
-	natsinternal "work-distribution-patterns/patterns/p04/internal/nats"
-	pgstore "work-distribution-patterns/patterns/p04/internal/postgres"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
 	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
 ⋮----
 "context"
 "html/template"
 "log"
-"net/http"
-"time"
-"github.com/jackc/pgx/v5/pgxpool"
 "github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-"github.com/nats-io/nats.go"
-natsinternal "work-distribution-patterns/patterns/p04/internal/nats"
-pgstore "work-distribution-patterns/patterns/p04/internal/postgres"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
 "work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
 "work-distribution-patterns/shared/templates"
 ⋮----
 type config struct {
-	Addr        string `envconfig:"addr" default:":8081"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+	Addr            string `envconfig:"addr" default:":8080"`
+	ManagerGRPCAddr string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
 }
 func main()
 ⋮----
 var cfg config
 ⋮----
-mgr := manager.New(taskStore, dispatcher, bus, 30*time.Second, false) // republishWorkerEvents=false; API subscribes directly to NATS
+// Connect to manager via gRPC
 ⋮----
-// Build the router manually — the manager accepts a fully-formed Task
-// (pre-created by the API with models.NewTask) rather than a submit request.
+// Subscribe to all events from manager via gRPC and pump into local SSE hub
+</file>
+
+<file path="patterns/p04/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+	"work-distribution-patterns/shared/executor"
+)
 ⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+"context"
+"log"
+"os/signal"
+"syscall"
+"time"
+"github.com/kelseyhightower/envconfig"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+"work-distribution-patterns/shared/executor"
 ⋮----
-// Accept a fully-formed Task forwarded by the API process.
+type config struct {
+	ManagerGRPCAddr  string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
 ⋮----
-var task models.Task
+var cfg config
 </file>
 
 <file path="shared/events/memory.go">
@@ -1182,6 +2033,74 @@ var sr submitResponse
 var tr taskResponse
 </file>
 
+<file path="patterns/p04/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net"
+	"net/http"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"google.golang.org/grpc"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net"
+"net/http"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"google.golang.org/grpc"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	HTTPAddr string `envconfig:"http_addr" default:":8081"`
+	GRPCAddr string `envconfig:"grpc_addr" default:":9091"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Create gRPC server
+⋮----
+// Start manager (handles task lifecycle and event routing)
+mgr := manager.New(taskStore, dispatcher, bus, 0, true) // republishWorkerEvents=true
+⋮----
+// Pump manager events into SSE hub for API processes to subscribe
+⋮----
+// Start gRPC server in background
+⋮----
+// HTTP API for compatibility with existing patterns (for remote API to call)
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// HTTP endpoint for API to submit tasks (compatibility with shared/client.RemoteTaskManager)
+⋮----
+var task models.Task
+</file>
+
 <file path="shared/contracts/consumer.go">
 package contracts
 import (
@@ -1275,55 +2194,6 @@ type TaskStore interface {
 	SetStatus(id string, status models.TaskStatus) error
 	SetDispatchedAt(id string, t time.Time) error
 }
-</file>
-
-<file path="shared/client/manager.go">
-package client
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
-	"github.com/labstack/echo/v4"
-	"work-distribution-patterns/shared/models"
-)
-⋮----
-"bytes"
-"context"
-"encoding/json"
-"fmt"
-"net/http"
-"time"
-"github.com/labstack/echo/v4"
-"work-distribution-patterns/shared/models"
-⋮----
-// RemoteTaskManager implements contracts.TaskManager by proxying Submit/Get/List
-// to the manager process over HTTP. Used by API processes in Patterns 2, 3, and 4.
-//
-// Events are handled separately — each pattern's API subscribes to events using
-// its native transport (SSE for P2/P3, NATS for P4).
-type RemoteTaskManager struct {
-	baseURL    string
-	httpClient *http.Client
-}
-// NewTaskManager creates a client connected to a Manager process.
-func NewTaskManager(baseURL string) *RemoteTaskManager
-// Submit sends a fully-formed Task to POST /tasks on the manager.
-// Maps 429 and 503 responses to the corresponding echo HTTP errors.
-func (m *RemoteTaskManager) Submit(ctx context.Context, task models.Task) error
-// Get fetches a single task from GET /tasks/:id on the manager.
-// Returns (Task{}, false) on 404 or any error.
-func (m *RemoteTaskManager) Get(ctx context.Context, id string) (models.Task, bool)
-⋮----
-var task models.Task
-⋮----
-// List fetches all tasks from GET /tasks on the manager.
-// Returns an empty slice on any error.
-func (m *RemoteTaskManager) List(ctx context.Context) []models.Task
-⋮----
-var tasks []models.Task
 </file>
 
 <file path="shared/contracts/manager.go">
@@ -1420,6 +2290,55 @@ func (s *MemoryStore) Get(id string) (models.Task, bool)
 func (s *MemoryStore) List() []models.Task
 func (s *MemoryStore) SetStatus(id string, status models.TaskStatus) error
 func (s *MemoryStore) SetDispatchedAt(id string, t time.Time) error
+</file>
+
+<file path="shared/client/manager.go">
+package client
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"bytes"
+"context"
+"encoding/json"
+"fmt"
+"net/http"
+"time"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/shared/models"
+⋮----
+// RemoteTaskManager implements contracts.TaskManager by proxying Submit/Get/List
+// to the manager process over HTTP. Used by API processes in Patterns 2, 3, and 5.
+//
+// Events are handled separately — each pattern's API subscribes to events using
+// its native transport (SSE for P2/P3, NATS for P5).
+type RemoteTaskManager struct {
+	baseURL    string
+	httpClient *http.Client
+}
+// NewTaskManager creates a client connected to a Manager process.
+func NewTaskManager(baseURL string) *RemoteTaskManager
+// Submit sends a fully-formed Task to POST /tasks on the manager.
+// Maps 429 and 503 responses to the corresponding echo HTTP errors.
+func (m *RemoteTaskManager) Submit(ctx context.Context, task models.Task) error
+// Get fetches a single task from GET /tasks/:id on the manager.
+// Returns (Task{}, false) on 404 or any error.
+func (m *RemoteTaskManager) Get(ctx context.Context, id string) (models.Task, bool)
+⋮----
+var task models.Task
+⋮----
+// List fetches all tasks from GET /tasks on the manager.
+// Returns an empty slice on any error.
+func (m *RemoteTaskManager) List(ctx context.Context) []models.Task
+⋮----
+var tasks []models.Task
 </file>
 
 <file path="tests/e2e/helpers_test.go">
@@ -1570,38 +2489,68 @@ type Stage struct {
 package e2e_test
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 )
 ⋮----
 "context"
+"fmt"
 "sync"
 "testing"
 "time"
 ⋮----
 // TestSingleTask verifies a 3-stage task emits progress events and reaches completed.
 func TestSingleTask(t *testing.T)
+⋮----
+const stageCount = 3
+// Connect SSE BEFORE submitting task to avoid missing events
+⋮----
+seenEvents := make(map[string]bool) // for duplicate detection
+⋮----
+// Filter to our task only
+⋮----
+// Create unique event signature for duplicate detection
+⋮----
+// Verify expected event counts
+// Executor emits 2 progress events per stage (start + complete)
+⋮----
+// Executor emits 2 status events (running, completed)
+⋮----
 // TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
 func TestConcurrentTasks(t *testing.T)
 ⋮----
 const numTasks = 3
 ⋮----
-// Submit all tasks first, then open per-task SSE connections.
+// Connect SSE BEFORE submitting tasks
 ⋮----
-// Fan-in all per-task SSE streams into a single merged channel.
+// Submit all tasks
 ⋮----
-var wg sync.WaitGroup
-⋮----
+eventCounts := make(map[string]map[string]int) // taskID -> eventType -> count
+seenEvents := make(map[string]bool)            // for duplicate detection across all tasks
 var mu sync.Mutex
 ⋮----
-// TestStatusTransitions verifies the task goes through pending → running → completed.
+// Track event counts per task
+⋮----
+// Verify event counts for this completed task
+⋮----
+// TestStatusTransitions verifies the task emits SSE status events: running → completed.
 func TestStatusTransitions(t *testing.T)
+⋮----
+const stageCount = 2
+// Connect SSE BEFORE submitting task
 ⋮----
 // Immediately check pending (task may have been picked up already)
 ⋮----
-// running is SSE-only (UI signal); skip store check to avoid the
-// race where the event fires before the client connects.
+// Track status transitions
+⋮----
+// Verify expected status sequence: running → completed
+// Note: pending is never emitted as an SSE event (only stored in DB)
+⋮----
+// Verify event counts
+⋮----
+// Verify final state in storage
 ⋮----
 var found *taskResponse
 </file>
@@ -1706,7 +2655,7 @@ type Manager struct {
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
 // republishWorkerEvents controls whether worker events are republished to the event bus.
-// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P4 (NATS peer subscription).
+// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P5 (NATS peer subscription).
 func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration, republishWorkerEvents bool) *Manager
 // Submit persists the task then dispatches it via the dispatcher.
 // Maps dispatcher sentinel errors to appropriate HTTP status codes.

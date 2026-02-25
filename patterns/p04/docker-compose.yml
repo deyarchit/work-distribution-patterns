@@ -1,0 +1,48 @@
+services:
+  manager:
+    build:
+      context: ../..
+      dockerfile: patterns/p04/Dockerfile.manager
+    environment:
+      - HTTP_ADDR=:8081
+      - GRPC_ADDR=:9091
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: patterns/p04/Dockerfile.api
+    environment:
+      - ADDR=:8080
+      - MANAGER_GRPC_ADDR=manager:9091
+    ports:
+      - "8080:8080"
+    depends_on:
+      manager:
+        condition: service_healthy
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: patterns/p04/Dockerfile.worker
+    environment:
+      - MANAGER_GRPC_ADDR=manager:9091
+    depends_on:
+      manager:
+        condition: service_healthy
+    restart: on-failure
+    deploy:
+      replicas: 3

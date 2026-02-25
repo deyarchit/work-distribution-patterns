@@ -1,0 +1,28 @@
+FROM golang:1.25-alpine AS builder
+
+# Install protoc and required tools
+RUN apk add --no-cache protobuf-dev
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Install protoc-gen-go and protoc-gen-go-grpc
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+COPY . .
+
+# Generate proto files
+RUN protoc --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    patterns/p04/proto/work.proto
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./patterns/p04/cmd/api
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /api /api
+EXPOSE 8080
+ENTRYPOINT ["/api"]

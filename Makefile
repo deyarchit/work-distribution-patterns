@@ -1,6 +1,13 @@
 SKILL_NAME = update-codemaps
 BASE_URL ?= http://localhost:8080
 
+## Generate protobuf code for Pattern 4
+gen-proto:
+	@echo "==> Generating protobuf code for Pattern 4"
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		patterns/p04/proto/work.proto
+
 ## Run Pattern 1 locally (no Docker)
 run-p1:
 	go run ./patterns/p01/cmd/server/
@@ -18,6 +25,13 @@ run-p3:
 
 stop-p3:
 	docker compose -f patterns/p03/docker-compose.yml down
+
+## Run Pattern 4 with Docker Compose (1 manager + 1 API + 3 workers)
+run-p4:
+	docker compose -f patterns/p04/docker-compose.yml up --build
+
+stop-p4:
+	docker compose -f patterns/p04/docker-compose.yml down
 
 ## Run Pattern 5 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + postgres + nginx)
 run-p5:
@@ -43,13 +57,16 @@ build-all:
 	go build -o bin/p3-api       ./patterns/p03/cmd/api
 	go build -o bin/p3-manager   ./patterns/p03/cmd/manager
 	go build -o bin/p3-worker    ./patterns/p03/cmd/worker
+	go build -o bin/p4-api       ./patterns/p04/cmd/api
+	go build -o bin/p4-manager   ./patterns/p04/cmd/manager
+	go build -o bin/p4-worker    ./patterns/p04/cmd/worker
 	go build -o bin/p5-api       ./patterns/p05/cmd/api
 	go build -o bin/p5-manager   ./patterns/p05/cmd/manager
 	go build -o bin/p5-worker    ./patterns/p05/cmd/worker
 
-## Build all binaries and validate all four patterns end-to-end
+## Build all binaries and validate all five patterns end-to-end
 test-all: build-all
-	@echo "==> [1/4] Pattern 1: Local-Channels"
+	@echo "==> [1/5] Pattern 1: Local-Channels"
 	@{ \
 	  ./bin/p1-server & \
 	  until curl -sf http://localhost:8080/tasks > /dev/null 2>&1; do sleep 1; done; \
@@ -57,21 +74,28 @@ test-all: build-all
 	  pkill -f "bin/p1-server" 2>/dev/null || true; \
 	  exit $$RC; \
 	}
-	@echo "==> [2/4] Pattern 2: Pull-REST"
+	@echo "==> [2/5] Pattern 2: Pull-REST"
 	@{ \
 	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p02/docker-compose.yml down; \
 	  exit $$RC; \
 	}
-	@echo "==> [3/4] Pattern 3: Push-WebSocket"
+	@echo "==> [3/5] Pattern 3: Push-WebSocket"
 	@{ \
 	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p03/docker-compose.yml down; \
 	  exit $$RC; \
 	}
-	@echo "==> [4/4] Pattern 5: Brokered-NATS"
+	@echo "==> [4/5] Pattern 4: Streaming-gRPC"
+	@{ \
+	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait && \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -f patterns/p04/docker-compose.yml down; \
+	  exit $$RC; \
+	}
+	@echo "==> [5/5] Pattern 5: Brokered-NATS"
 	@{ \
 	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
@@ -96,7 +120,7 @@ update-codemaps:
 	@echo "Running repomix to generate static codemap"
 	npx repomix@latest
 	@echo "Launching Claude Code to run skill: $(SKILL_NAME)..."
-	claude --model="haiku" --permission-mode="dontAsk" run the $(SKILL_NAME) skill"
+	claude --model="haiku" --permission-mode="acceptEdits" "run the $(SKILL_NAME) skill"
 	@echo "Updated codemaps"
 
 .PHONY: *

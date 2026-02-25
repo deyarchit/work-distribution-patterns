@@ -1,4 +1,4 @@
-<!-- Commit: 4751c24ca66c35b4597fa4fad88d669792d8301b | Files scanned: 47 | Token estimate: ~920 -->
+<!-- Commit: f5c70505b68226bac66d88c059907dd521ec813f | Files scanned: 60 | Token estimate: ~980 -->
 
 # Backend Codemap
 
@@ -20,6 +20,8 @@
 | `shared/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying Submit/Get/List over HTTP. Used by P2, P3, and P5 APIs. |
 | `p02/internal/rest` (pkg `rest`) | `dispatcher.go`, `consumer.go` | `RESTDispatcher` (TaskDispatcher): buffered chan + HTTP handlers `/work/next`, `/work/events`; `RESTConsumer` (TaskConsumer): polling loop |
 | `p03/internal/websocket` (pkg `wsinternal`) | `dispatcher.go`, `consumer.go` | `WebSocketDispatcher` (TaskDispatcher): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
+| `p04/internal/grpc` (pkg `grpc`) | `client.go`, `server.go`, `dispatcher.go`, `consumer.go`, `converter.go` | `gRPCDispatcher` (TaskDispatcher): bidirectional stream management; `gRPCConsumer` (TaskConsumer): gRPC client; protobuf types in `proto/work.proto` |
+| `p04/proto` | `work.proto`, `work.pb.go`, `work_grpc.pb.go` | Protocol buffer definitions for gRPC messages; auto-generated bindings |
 | `p05/internal/nats` (pkg `natsinternal`) | `dispatcher.go`, `consumer.go`, `setup.go` | `NATSDispatcher`, `NATSConsumer`, JetStream stream setup |
 | `p05/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
 
@@ -90,5 +92,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 **Pattern 2** — Three separate processes: API, Manager, Worker. `shared/client.RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP. Manager creates `MemoryEventBus` and pumps it to SSE hub; API subscribes via `sse.Client`. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTDispatcher.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled.
 
 **Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher`, `MemoryEventBus`, and MemoryStore. Manager pumps `MemoryEventBus` to SSE hub; API subscribes via `sse.Client`. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled.
+
+**Pattern 4** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `gRPCDispatcher`, `MemoryEventBus`, and MemoryStore. Manager pumps `MemoryEventBus` to SSE hub; API subscribes via `sse.Client`. `gRPCDispatcher.Start` listens for gRPC connections on configured address; `Dispatch` sends tasks over established streams. `gRPCConsumer` maintains persistent bidirectional stream with manager, emits events as gRPC messages. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled. Uses protobuf-generated code from `work.proto`.
 
 **Pattern 5** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager does NOT republish events to event bus (`republishWorkerEvents=false`) because APIs subscribe directly to NATS `task.events.*`. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.

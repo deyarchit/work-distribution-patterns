@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package work;
+
+option go_package = "work-distribution-patterns/patterns/p04/proto/gen;gen";
+
+// Stage represents a single processing step within a task
+message Stage {
+  string name = 1;
+  int32 duration_ms = 2;
+  string status = 3;
+  optional string error = 4;
+}
+
+// Task represents a work item
+message Task {
+  string id = 1;
+  string title = 2;
+  string status = 3;
+  repeated Stage stages = 4;
+  int64 created_at = 5;
+  int64 updated_at = 6;
+}
+
+// TaskEvent represents a status update or progress event
+message TaskEvent {
+  string task_id = 1;
+  string event_type = 2;
+  string status = 3;
+  optional string stage_name = 4;
+  optional int32 progress = 5;
+  optional string error = 6;
+  int64 timestamp = 7;
+}
+
+// Request/Response messages for TaskManager service (API -> Manager)
+message SubmitRequest {
+  Task task = 1;
+}
+
+message SubmitResponse {
+  // Empty response on success
+}
+
+message GetRequest {
+  string task_id = 1;
+}
+
+message GetResponse {
+  Task task = 1;
+  bool found = 2;
+}
+
+message ListRequest {
+  // Empty - returns all tasks
+}
+
+message ListResponse {
+  repeated Task tasks = 1;
+}
+
+message SubscribeRequest {
+  optional string task_id = 1;  // Empty for global subscription
+}
+
+// WorkDistribution service: Manager -> Worker bidirectional streaming
+service WorkDistribution {
+  // Connect establishes a bidirectional stream between Manager and Worker
+  // Manager sends Tasks down; Worker sends TaskEvents up
+  rpc Connect(stream TaskEvent) returns (stream Task);
+}
+
+// TaskManager service: API -> Manager
+service TaskManager {
+  // Submit creates a new task
+  rpc Submit(SubmitRequest) returns (SubmitResponse);
+
+  // Get retrieves a task by ID
+  rpc Get(GetRequest) returns (GetResponse);
+
+  // List returns all tasks
+  rpc List(ListRequest) returns (ListResponse);
+
+  // Subscribe streams events for a specific task or all tasks
+  rpc Subscribe(SubscribeRequest) returns (stream TaskEvent);
+}

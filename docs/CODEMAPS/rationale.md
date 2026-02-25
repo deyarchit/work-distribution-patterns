@@ -1,5 +1,13 @@
 # Codemap Rationale Log
 
+## f5c7050 — 2026-02-24
+Commits: `96111a2..f5c7050` (Add grpc pattern, rename pattern 04 → 05)
+
+### Decisions
+- **Add Pattern 4 (gRPC bidirectional streaming)**: Sits between P3 (WebSocket) and P5 (NATS+Postgres) in the architectural progression. gRPC provides: persistent bidirectional streams like WebSocket, but with HTTP/2 multiplexing; protobuf serialization for typed messages; stronger typing than raw TCP. Pattern demonstrates typed RPC-based work distribution — a middle ground between WebSocket's simplicity and NATS's queue guarantees.
+- **Rename P4 → P5 (NATS JetStream pattern)**: "P4" is now gRPC, so the previous queue-and-store pattern (NATS+postgres) becomes P5. The progression is now: goroutines → REST → WebSocket → gRPC → NATS+postgres.
+- **Protobuf schema for P4**: `work.proto` defines `Task`, `TaskEvent`, `DispatchRequest`, `EventStream` messages. Auto-generated `work.pb.go` and `work_grpc.pb.go` provide type safety and code generation benefits (compared to ad-hoc JSON over WebSocket).
+
 ## 4751c24 — 2026-02-24
 Commits: `40d4c7d..4751c24` (Fix bug in manager for nats pattern)
 
