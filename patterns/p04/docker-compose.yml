@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tasks
+      POSTGRES_USER: tasks
+      POSTGRES_PASSWORD: tasks
+    # No named volume: data lives in the container's ephemeral layer and is
+    # wiped on `docker compose down`, giving every test run a clean database.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasks -d tasks"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:latest
+    command: ["-m", "8222", "-c", "/etc/nats/nats.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # monitoring
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
+
+  manager:
+    build:
+      context: ../..
+      dockerfile: patterns/p04/Dockerfile.manager
+    environment:
+      - ADDR=:8081
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgres://tasks:tasks@postgres:5432/tasks?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: patterns/p04/Dockerfile.api
+    environment:
+      - ADDR=:8080
+      - MANAGER_URL=http://manager:8081
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      manager:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: on-failure
+    deploy:
+      replicas: 3
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: patterns/p04/Dockerfile.worker
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      - nats
+    restart: on-failure
+    deploy:
+      replicas: 3
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
