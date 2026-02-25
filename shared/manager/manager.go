@@ -31,7 +31,7 @@ type Manager struct {
 // New creates a Manager.
 // deadline controls re-dispatch: 0 disables the deadline loop entirely.
 // republishWorkerEvents controls whether worker events are republished to the event bus.
-// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P4 (NATS peer subscription).
+// Set to true for P1-P3 (MemoryEventBus requires republishing), false for P5 (NATS peer subscription).
 func New(s store.TaskStore, d dispatch.TaskDispatcher, evs events.TaskEventBus, deadline time.Duration, republishWorkerEvents bool) *Manager {
 	return &Manager{
 		store:                 s,

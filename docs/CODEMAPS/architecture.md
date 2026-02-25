@@ -21,8 +21,8 @@ store.TaskStore            Create/Get/List/SetStatus             — task persis
 Sentinel errors from `Dispatch`: `ErrDispatchFull` → HTTP 429, `ErrNoWorkers` → HTTP 503.
 
 `TaskManager.Get/List` let the API query task state without direct store access.
-Event streaming is wired explicitly in `main.go`: managers publish to `TaskEventBus`, which is pumped to SSE hub; APIs subscribe via `sse.Client` (P2/P3) or NATS (P4).
-`shared/client.RemoteTaskManager` implements `TaskManager` by proxying Submit/Get/List over HTTP; used by P2/P3/P4 APIs.
+Event streaming is wired explicitly in `main.go`: managers publish to `TaskEventBus`, which is pumped to SSE hub; APIs subscribe via `sse.Client` (P2/P3) or NATS (P5).
+`shared/client.RemoteTaskManager` implements `TaskManager` by proxying Submit/Get/List over HTTP; used by P2/P3/P5 APIs.
 
 ## Process Topology
 
@@ -31,7 +31,7 @@ Event streaming is wired explicitly in `main.go`: managers publish to `TaskEvent
 | P1 | single process | same | goroutines | in-process channels |
 | P2 | :8080 | :8081 | separate process | REST polling |
 | P3 | :8080 | :8081 | separate process | WebSocket push |
-| P4 | :8080 (×3) | :8081 (×1) | separate process (×3) | NATS JetStream |
+| P5 | :8080 (×3) | :8081 (×1) | separate process (×3) | NATS JetStream |
 
 ## Three-Layer Structure
 
@@ -93,7 +93,7 @@ Browser ◄── GET /events ── local hub ◄── pump ◄── sse.Clie
 - Store: `MemoryStore` (manager-local); Backpressure: HTTP 503; Deadline loop: disabled
 - Worker registration: `GET /ws/register` on Manager → `WebSocketDispatcher.Register(conn)`
 
-## Pattern 4: Queue-and-Store (horizontally scaled)
+## Pattern 5: Queue-and-Store (horizontally scaled)
 
 ```
 Browser ──POST /tasks──► nginx ──► API replica (:8080) ──► RemoteTaskManager.Submit ──► POST /tasks ──► Manager (:8081)

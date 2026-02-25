@@ -3,10 +3,10 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /manager ./patterns/p04/cmd/manager
+RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./patterns/p05/cmd/api
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /manager /manager
-EXPOSE 8081
-ENTRYPOINT ["/manager"]
+COPY --from=builder /api /api
+EXPOSE 8080
+ENTRYPOINT ["/api"]

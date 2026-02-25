@@ -11,17 +11,17 @@
 | `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, single `runEventLoop` conditionally routes worker events to event bus (true for MemoryEventBus, false for NATS) |
 | `shared/executor` | `executor.go` | Stage runner; emits all events (running/progress/terminal) via `contracts.TaskConsumer`; returns nothing |
 | `shared/models` | `task.go` | `Task`, `Stage`, `TaskEvent`, `TaskStatus`, event-type constants |
-| `shared/events` | `events.go`, `memory.go`, `nats.go` | `TaskEventBus` interface; `MemoryEventBus` (P1–P3), `NATSEventBus` (P4) |
+| `shared/events` | `events.go`, `memory.go`, `nats.go` | `TaskEventBus` interface; `MemoryEventBus` (P1–P3), `NATSEventBus` (P5) |
 | `shared/sse` | `hub.go`, `client.go` | `Hub`: SSE fan-out; `Client`: SSE subscriber (used by P2/P3 APIs) |
 | `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
 | `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
 | `p01/internal/goroutine` | `dispatcher.go`, `consumer.go` | `ChannelDispatcher`+`ChannelConsumer` (single shared `events chan TaskEvent`); constructed together by `New` |
 | `p01/internal/worker` | `worker.go` | `RunWorker`: `Receive` → `exec.Run(ctx, task, consumer)` loop |
-| `shared/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying Submit/Get/List over HTTP. Used by P2, P3, and P4 APIs. |
+| `shared/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying Submit/Get/List over HTTP. Used by P2, P3, and P5 APIs. |
 | `p02/internal/rest` (pkg `rest`) | `dispatcher.go`, `consumer.go` | `RESTDispatcher` (TaskDispatcher): buffered chan + HTTP handlers `/work/next`, `/work/events`; `RESTConsumer` (TaskConsumer): polling loop |
 | `p03/internal/websocket` (pkg `wsinternal`) | `dispatcher.go`, `consumer.go` | `WebSocketDispatcher` (TaskDispatcher): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
-| `p04/internal/nats` (pkg `natsinternal`) | `dispatcher.go`, `consumer.go`, `setup.go` | `NATSDispatcher`, `NATSConsumer`, JetStream stream setup |
-| `p04/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
+| `p05/internal/nats` (pkg `natsinternal`) | `dispatcher.go`, `consumer.go`, `setup.go` | `NATSDispatcher`, `NATSConsumer`, JetStream stream setup |
+| `p05/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
 
 ## API Routes (`shared/api`)
 
@@ -91,4 +91,4 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 
 **Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher`, `MemoryEventBus`, and MemoryStore. Manager pumps `MemoryEventBus` to SSE hub; API subscribes via `sse.Client`. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Manager republishes events to MemoryEventBus (`republishWorkerEvents=true`). Deadline disabled.
 
-**Pattern 4** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager does NOT republish events to event bus (`republishWorkerEvents=false`) because APIs subscribe directly to NATS `task.events.*`. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.
+**Pattern 5** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager does NOT republish events to event bus (`republishWorkerEvents=false`) because APIs subscribe directly to NATS `task.events.*`. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.

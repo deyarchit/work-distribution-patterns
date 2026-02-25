@@ -19,12 +19,12 @@ run-p3:
 stop-p3:
 	docker compose -f patterns/p03/docker-compose.yml down
 
-## Run Pattern 4 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + postgres + nginx)
-run-p4:
-	docker compose -f patterns/p04/docker-compose.yml up --build
+## Run Pattern 5 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + postgres + nginx)
+run-p5:
+	docker compose -f patterns/p05/docker-compose.yml up --build
 
-stop-p4:
-	docker compose -f patterns/p04/docker-compose.yml down
+stop-p5:
+	docker compose -f patterns/p05/docker-compose.yml down
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
@@ -43,9 +43,9 @@ build-all:
 	go build -o bin/p3-api       ./patterns/p03/cmd/api
 	go build -o bin/p3-manager   ./patterns/p03/cmd/manager
 	go build -o bin/p3-worker    ./patterns/p03/cmd/worker
-	go build -o bin/p4-api       ./patterns/p04/cmd/api
-	go build -o bin/p4-manager   ./patterns/p04/cmd/manager
-	go build -o bin/p4-worker    ./patterns/p04/cmd/worker
+	go build -o bin/p5-api       ./patterns/p05/cmd/api
+	go build -o bin/p5-manager   ./patterns/p05/cmd/manager
+	go build -o bin/p5-worker    ./patterns/p05/cmd/worker
 
 ## Build all binaries and validate all four patterns end-to-end
 test-all: build-all
@@ -71,11 +71,11 @@ test-all: build-all
 	  docker compose -f patterns/p03/docker-compose.yml down; \
 	  exit $$RC; \
 	}
-	@echo "==> [4/4] Pattern 4: Brokered-NATS"
+	@echo "==> [4/4] Pattern 5: Brokered-NATS"
 	@{ \
-	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait && \
+	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p04/docker-compose.yml down; \
+	  docker compose -f patterns/p05/docker-compose.yml down; \
 	  exit $$RC; \
 	}
 

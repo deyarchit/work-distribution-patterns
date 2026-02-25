@@ -11,7 +11,7 @@ A Go demo exploring various work-distribution patterns with progressively increa
 | **p01: Local-Channels** | Single process | In-process channels | Embedded Monolith |
 | **p02: Pull-REST** | 1 API + N workers | HTTP Long-polling | Tiered Remote Polling |
 | **p03: Push-WebSocket** | 1 API + N workers | Persistent WebSockets | Tiered Remote Push |
-| **p04: Brokered-NATS** | N APIs + N workers | NATS + PostgreSQL | Distributed Event-Driven |
+| **p05: Brokered-NATS** | N APIs + N workers | NATS + PostgreSQL | Distributed Event-Driven |
 
 All patterns expose an **identical HTTP API** and **identical HTMX frontend**. Only the internal dispatch mechanism and layering changes.
 
@@ -38,10 +38,10 @@ make run-p3
 # open http://localhost:8080
 ```
 
-### Pattern 4: Brokered-NATS (Docker)
+### Pattern 5: Brokered-NATS (Docker)
 
 ```bash
-make run-p4
+make run-p5
 # open http://localhost:8080
 ```
 
@@ -60,7 +60,7 @@ Browser
                    │ contracts.TaskDispatcher interface
         ┌──────────┴─────────────────────────┐
         │                                    │
-      p01                                 p02 / p03 / p04
+      p01                                 p02 / p03 / p05
   ChannelDispatcher              REST/WS/NATSDispatcher
   (in-process)                (routes to external workers)
 ```
@@ -111,5 +111,5 @@ patterns/
 ├── p01/          Local-Channels: Bounded goroutine pool (in-process)
 ├── p02/          Pull-REST: REST-based worker polling
 ├── p03/          Push-WebSocket: WebSocket dispatch to external workers
-└── p04/          Brokered-NATS: NATS JetStream (queue) + PostgreSQL (store)
+└── p05/          Brokered-NATS: NATS JetStream (queue) + PostgreSQL (store)
 ```

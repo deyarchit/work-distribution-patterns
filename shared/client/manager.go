@@ -14,10 +14,10 @@ import (
 )
 
 // RemoteTaskManager implements contracts.TaskManager by proxying Submit/Get/List
-// to the manager process over HTTP. Used by API processes in Patterns 2, 3, and 4.
+// to the manager process over HTTP. Used by API processes in Patterns 2, 3, and 5.
 //
 // Events are handled separately — each pattern's API subscribes to events using
-// its native transport (SSE for P2/P3, NATS for P4).
+// its native transport (SSE for P2/P3, NATS for P5).
 type RemoteTaskManager struct {
 	baseURL    string
 	httpClient *http.Client

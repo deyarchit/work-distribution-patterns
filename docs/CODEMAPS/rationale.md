@@ -6,27 +6,27 @@ Commits: `40d4c7d..4751c24` (Fix bug in manager for nats pattern)
 ### Decisions
 - **Conditional event republishing in Manager**: Added `republishWorkerEvents` flag to `Manager.New()` to control whether worker events are republished to the event bus.
   - **P1–P3** (`republishWorkerEvents=true`): Use `MemoryEventBus`, which requires explicit republishing of dispatcher events to feed the SSE hub. Without republishing, browser subscribers receive no worker progress/status updates.
-  - **P4** (`republishWorkerEvents=false`): Use `NATSEventBus`, where the dispatcher publishes directly to NATS `task.events.*` and APIs subscribe directly. Republishing to the event bus is redundant — it was incorrectly happening before this fix, causing duplicate event flow.
+  - **P5** (`republishWorkerEvents=false`): Use `NATSEventBus`, where the dispatcher publishes directly to NATS `task.events.*` and APIs subscribe directly. Republishing to the event bus is redundant — it was incorrectly happening before this fix, causing duplicate event flow.
 
-  This bug fix ensures P4 doesn't duplicate event publication and maintains the correct event flow for each pattern.
+  This bug fix ensures P5 doesn't duplicate event publication and maintains the correct event flow for each pattern.
 
 ## 89762b6 — 2026-02-24
 Commits: `420cf39..89762b6` (Rename pattern folders, configure repomix, update codemaps)
 
 ### Decisions
-- **Rename pattern directories for clarity**: `patterns/01-goroutine-pool` → `patterns/p01`, `patterns/02-rest-polling` → `patterns/p02`, etc. Shorthand names (`p01`, `p02`, `p03`, `p04`) reduce verbosity in Makefiles, Dockerfiles, and documentation while preserving the descriptive names in code comments and codemaps. This mirrors common naming in CLI tools and makes shell history/scripts more readable.
+- **Rename pattern directories for clarity**: `patterns/01-goroutine-pool` → `patterns/p01`, `patterns/02-rest-polling` → `patterns/p02`, etc. Shorthand names (`p01`, `p02`, `p03`, `p05`) reduce verbosity in Makefiles, Dockerfiles, and documentation while preserving the descriptive names in code comments and codemaps. This mirrors common naming in CLI tools and makes shell history/scripts more readable.
 
 ## 420cf39 — 2026-02-23
 Commits: `0f2a79b..420cf39` (Remove polling; extract event bus abstraction)
 
 ### Decisions
-- **Remove `TaskManager.Subscribe()` and extract `events.TaskEventBus`**: Previously, `TaskManager` owned event subscription — remote APIs called `RemoteTaskManager.Subscribe()` which internally used SSE polling. This mixed task management with event transport. The new `TaskEventBus` interface (Publish/Subscribe) provides clean separation: managers publish to the bus, wiring in `main.go` pumps bus → SSE hub, APIs subscribe via transport-specific clients (`sse.Client` for P2/P3, NATS for P4).
+- **Remove `TaskManager.Subscribe()` and extract `events.TaskEventBus`**: Previously, `TaskManager` owned event subscription — remote APIs called `RemoteTaskManager.Subscribe()` which internally used SSE polling. This mixed task management with event transport. The new `TaskEventBus` interface (Publish/Subscribe) provides clean separation: managers publish to the bus, wiring in `main.go` pumps bus → SSE hub, APIs subscribe via transport-specific clients (`sse.Client` for P2/P3, NATS for P5).
 
 - **`shared/sse/client.go` replaces `RemoteTaskManager.Subscribe`**: P2/P3 APIs now use `sse.Client` to subscribe to manager's SSE endpoint. Reconnection logic (exponential backoff) is centralized in `Client.streamWithReconnect`, removing duplicated SSE parsing from `RemoteTaskManager`.
 
-- **Pattern-specific event wiring in `main.go`**: P1–P3 use `MemoryEventBus` + SSE; P4 uses `NATSEventBus` + direct NATS subscription in API replicas. Event flow is now explicit and visible at startup, not buried in cross-process HTTP calls.
+- **Pattern-specific event wiring in `main.go`**: P1–P3 use `MemoryEventBus` + SSE; P5 uses `NATSEventBus` + direct NATS subscription in API replicas. Event flow is now explicit and visible at startup, not buried in cross-process HTTP calls.
 
-- **P4 API requires `NATS_URL`**: APIs subscribe directly to NATS `task.events.*` instead of polling manager's SSE endpoint, eliminating the manager as event bottleneck and enabling true distributed pub/sub.
+- **P5 API requires `NATS_URL`**: APIs subscribe directly to NATS `task.events.*` instead of polling manager's SSE endpoint, eliminating the manager as event bottleneck and enabling true distributed pub/sub.
 
 ## 0f2a79c — 2026-02-23
 Commits: `0f2a79b..0f2a79c` (Rename TaskProducer → TaskDispatcher, update TaskConsumer terminology)
@@ -41,20 +41,20 @@ Commits: `0f2a79b..0f2a79c` (Rename TaskProducer → TaskDispatcher, update Task
 - **Rename implementation types and variables for consistency**: `ChannelProducer` → `ChannelDispatcher`, `NATSConsumer` → `NATSWorker`, etc. Variable names like `source` and `bus` were renamed to `worker` and `dispatcher` throughout the codebase.
 
 ## 0f2a79b — 2026-02-23
-Commits: `0617358..0f2a79b` (Separate manager process for P3 and P4; extract shared/client)
+Commits: `0617358..0f2a79b` (Separate manager process for P3 and P5; extract shared/client)
 
 ### Decisions
-- **Extract `RemoteTaskManager` to `shared/client`**: Previously lived in `p02/internal/client`. P3 and P4 APIs now also use it (they were restructured to be thin proxies like P2). Moving it to `shared/client` avoids duplication and makes the shared transport contract explicit.
+- **Extract `RemoteTaskManager` to `shared/client`**: Previously lived in `p02/internal/client`. P3 and P5 APIs now also use it (they were restructured to be thin proxies like P2). Moving it to `shared/client` avoids duplication and makes the shared transport contract explicit.
 
-- **P3: Split API (:8080) and Manager (:8081) into separate processes**: Previously the P3 API owned the WebSocket hub and MemoryStore directly (single-process). Splitting to API+Manager+Worker makes P3's topology match P2 and P4 — each pattern cleanly separates "HTTP frontend" from "task orchestration". Workers now register to `ws://manager:8081/ws/register` instead of the API.
+- **P3: Split API (:8080) and Manager (:8081) into separate processes**: Previously the P3 API owned the WebSocket hub and MemoryStore directly (single-process). Splitting to API+Manager+Worker makes P3's topology match P2 and P5 — each pattern cleanly separates "HTTP frontend" from "task orchestration". Workers now register to `ws://manager:8081/ws/register` instead of the API.
 
-- **P4: API replicas become thin proxies (like P2/P3)**: Previously each API replica connected directly to NATS and postgres. All NATS and postgres ownership moved into the dedicated manager process. API replicas only hold `RemoteTaskManager` + a local `sse.Hub` fed by the manager's SSE stream. This eliminates connection pool multiplicity and clarifies responsibility boundaries.
+- **P5: API replicas become thin proxies (like P2/P3)**: Previously each API replica connected directly to NATS and postgres. All NATS and postgres ownership moved into the dedicated manager process. API replicas only hold `RemoteTaskManager` + a local `sse.Hub` fed by the manager's SSE stream. This eliminates connection pool multiplicity and clarifies responsibility boundaries.
 
 ## 0617358 — 2026-02-23
 Commits: `a3caca0..0617358` (Pattern 2 REST polling, renumber patterns, expand TaskManager, API layer refactor)
 
 ### Decisions
-- **Insert REST Polling as Pattern 2, renumber old P2→P3, P3→P4**: Introduces a more gradual architectural progression — goroutines → REST polling → WebSocket → NATS+Postgres. Each step adds exactly one new complexity (cross-process boundary, long-lived connections, persistent queuing).
+- **Insert REST Polling as Pattern 2, renumber old P2→P3, P3→P5**: Introduces a more gradual architectural progression — goroutines → REST polling → WebSocket → NATS+Postgres. Each step adds exactly one new complexity (cross-process boundary, long-lived connections, persistent queuing).
 
 - **Expand `contracts.TaskManager` with `Get/List/Subscribe`**: The API layer should never access the store directly — all reads flow through the manager. This discipline is essential for Pattern 2 where API and manager are separate processes. `Subscribe` streams `TaskEvent` from the manager's hub over SSE, letting the API pump events into its local hub without the manager knowing about the API.
 
@@ -87,10 +87,10 @@ Commits: `5054cca..e927fc3` (+ uncommitted rename + PostgreSQL work)
   EXISTS` keeps the setup self-contained without requiring a migration tool or init script.
 
 ## df20ceb — 2026-02-19
-Commits: `9d2e9eb..df20ceb` (+ uncommitted Pattern 4 work)
+Commits: `9d2e9eb..df20ceb` (+ uncommitted Pattern 5 work)
 
 ### Decisions
-- **Pattern 4 renamed `04-redis-pubsub` → `04-nats-redis`**: The pattern was redesigned
+- **Pattern 5 renamed `04-redis-pubsub` → `04-nats-redis`**: The pattern was redesigned
   to use NATS JetStream for API→Worker task delivery (at-least-once, same as Pattern 3)
   and Redis Pub/Sub only for the SSE fan-out layer within the API tier. Workers use
   `RedisSink` to publish progress directly to Redis; all API replicas PSubscribe and
@@ -134,7 +134,7 @@ Commits: `40c16d7..7fe066a`
   `models.TaskCompleted` for all `done` messages — failed tasks appeared as completed.
   Added `Status` field to `DoneMsg`; added `StatusMsg` for non-terminal `running` status.
 
-- **NATS `nats.conf` for P3/P4**: NATS 2.12+ changed JetStream defaults — `Max Storage: 0 B`
+- **NATS `nats.conf` for P3/P5**: NATS 2.12+ changed JetStream defaults — `Max Storage: 0 B`
   without explicit config. Running with `-js` flag alone disables file storage. Explicit
   `nats.conf` with `max_file_store: 1GB` and a named Docker volume is required.
 
@@ -154,7 +154,7 @@ Commits: `7fe066a..394144d`
 
 - **Deadline loop in shared Manager**: Re-dispatch logic (scan non-terminal tasks, re-enqueue
   if `now - dispatchTime > deadline`) lives once in `Manager.runDeadlineLoop`. Passing
-  `deadline=0` disables the loop entirely — P1/P2 skip it; P3/P4 use 30 s.
+  `deadline=0` disables the loop entirely — P1/P2 skip it; P3/P5 use 30 s.
 
 - **`context.Background()` in P1 server (no signal handling)**: Adding `signal.NotifyContext`
   caused SIGTERM to be intercepted, keeping the Echo server alive and blocking port 8080

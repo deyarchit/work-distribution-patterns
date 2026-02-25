@@ -25,7 +25,7 @@ services:
   manager:
     build:
       context: ../..
-      dockerfile: patterns/p04/Dockerfile.manager
+      dockerfile: patterns/p05/Dockerfile.manager
     environment:
       - ADDR=:8081
       - NATS_URL=nats://nats:4222
@@ -46,7 +46,7 @@ services:
   api:
     build:
       context: ../..
-      dockerfile: patterns/p04/Dockerfile.api
+      dockerfile: patterns/p05/Dockerfile.api
     environment:
       - ADDR=:8080
       - MANAGER_URL=http://manager:8081
@@ -69,7 +69,7 @@ services:
   worker:
     build:
       context: ../..
-      dockerfile: patterns/p04/Dockerfile.worker
+      dockerfile: patterns/p05/Dockerfile.worker
     environment:
       - NATS_URL=nats://nats:4222
     depends_on:

@@ -53,6 +53,6 @@ func main() {
 	}
 
 	e := api.NewRouter(hub, tpl, taskManager)
-	log.Printf("Pattern 4 (Queue-and-Store) API listening on %s [manager=%s]", cfg.Addr, cfg.ManagerURL)
+	log.Printf("Pattern 5 (Queue-and-Store) API listening on %s [manager=%s]", cfg.Addr, cfg.ManagerURL)
 	log.Fatal(e.Start(cfg.Addr))
 }

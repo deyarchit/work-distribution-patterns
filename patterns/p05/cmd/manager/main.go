@@ -13,8 +13,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/nats-io/nats.go"
 
-	natsinternal "work-distribution-patterns/patterns/p04/internal/nats"
-	pgstore "work-distribution-patterns/patterns/p04/internal/postgres"
+	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/manager"
@@ -110,6 +110,6 @@ func main() {
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
 
-	log.Printf("Pattern 4 (Queue-and-Store) Manager listening on %s", cfg.Addr)
+	log.Printf("Pattern 5 (Queue-and-Store) Manager listening on %s", cfg.Addr)
 	log.Fatal(e.Start(cfg.Addr))
 }
