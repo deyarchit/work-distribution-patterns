@@ -1,4 +1,4 @@
-<!-- Commit: 8a14f57021b0551a79c6ad997673258aca34e75f | Files scanned: 28 | Token estimate: ~900 -->
+<!-- Commit: 7f9d7742a6dc8afe83672e35b34507290d857d48 | Files scanned: 28 | Token estimate: ~900 -->
 
 # Dependencies & Configuration
 
@@ -83,15 +83,19 @@ Manager uses `NATSBridge` to publish events; `pgstore.Store` (PostgreSQL) is the
 ### Pattern 6 — Docker Compose (`patterns/p06`)
 ```
 [nginx]        ← patterns/p06/nginx/nginx.conf   (port 8080 → upstream api)
-  ├─ [api ×3] ← patterns/p06/Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
-[manager ×1]   ← patterns/p06/Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns CloudDispatcher, postgres, SSE hub)
-[worker ×3]    ← patterns/p06/Dockerfile.worker   (NATS_URL, MAX_STAGE_DURATION)
-[nats]         ← nats:latest + patterns/p06/nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
-               ← named volume: nats-jetstream (persistent across restarts)
+  ├─ [api ×3] ← patterns/p06/Dockerfile.api     (MANAGER_URL=http://manager:8081, BROKER_URL=..., depends_on manager healthy)
+[manager ×1]   ← patterns/p06/Dockerfile.manager  (port 8081; BROKER_URL, DATABASE_URL; owns CloudDispatcher, postgres, SSE hub)
+[worker ×3]    ← patterns/p06/Dockerfile.worker   (BROKER_URL, MAX_STAGE_DURATION)
+[broker]       ← NATS (default) or Kafka (configurable via BROKER variable)
+               ← docker-compose.base.yml + docker-compose.nats.yml (or .kafka.yml)
+               ← Named volume: nats-jetstream (NATS only; persistent across restarts)
 [postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
 ```
 
-API replicas use SSE hub fed by gocloud pubsub pump; no sticky sessions. Manager owns all pub/sub connections. Uses gocloud-specific URLs: `nats://nats:4222/tasks.new?stream_name=TASKS`, `/events.api?stream_name=EVENTS`. Two streams: TASKS (WorkQueue, file storage), EVENTS (Interest, memory storage). Durable consumers: manager (`manager-events`), workers (shared `workers`), APIs (ephemeral).
+**Broker Selection:** `make run-p6 BROKER=nats` (default) or `make run-p6 BROKER=kafka`.
+- **NATS:** Uses `gocloud.dev/pubsub/natspubsub` driver; two JetStream streams (TASKS: WorkQueue, EVENTS: Interest)
+- **Kafka:** Uses `gocloud.dev/pubsub/kafkapubsub` driver; same topic-based routing
+- API replicas subscribe directly; no sticky sessions. Manager owns all connections.
 
 ## Build Targets
 
@@ -108,7 +112,7 @@ make run-p2         # docker compose up (Pattern 2: REST polling)
 make run-p3         # docker compose up (Pattern 3: WebSocket hub)
 make run-p4         # docker compose up (Pattern 4: gRPC bidirectional)
 make run-p5         # docker compose up (Pattern 5: Queue-and-Store)
-make run-p6         # docker compose up (Pattern 6: Cloud-Agnostic PubSub)
+make run-p6         # docker compose up (Pattern 6: Cloud-Agnostic PubSub; BROKER=nats or kafka, default: nats)
 make test-all       # build-all + E2E tests against all 6 patterns
 make test-e2e       # E2E tests against BASE_URL (default :8080)
 make test-load      # load test against BASE_URL

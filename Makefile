@@ -91,7 +91,8 @@ test-all: build-all
 	@echo "==> [2/6] Pattern 2: Pull-REST"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p02/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
@@ -99,7 +100,8 @@ test-all: build-all
 	@echo "==> [3/6] Pattern 3: Push-WebSocket"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p03/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
@@ -107,7 +109,8 @@ test-all: build-all
 	@echo "==> [4/6] Pattern 4: Streaming-gRPC"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p04/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
@@ -115,25 +118,28 @@ test-all: build-all
 	@echo "==> [5/6] Pattern 5: Brokered-NATS"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p05/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [6/6] Pattern 6: Cloud-Agnostic (NATS)"
+	@echo "==> [6/7] Pattern 6: Cloud-Agnostic (NATS)"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [7/7] Pattern 6: Cloud-Agnostic (RabbitMQ)"
+	@echo "==> [7/7] Pattern 6: Cloud-Agnostic (Kafka)"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.rabbitmq.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.rabbitmq.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 

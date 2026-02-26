@@ -1317,155 +1317,6 @@ var status string
 var stagesJSON string
 </file>
 
-<file path="patterns/p06/cmd/api/main.go">
-package main
-import (
-	"context"
-	"encoding/json"
-	"html/template"
-	"log"
-	"github.com/kelseyhightower/envconfig"
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/client"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"encoding/json"
-"html/template"
-"log"
-"github.com/kelseyhightower/envconfig"
-pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/client"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr       string `envconfig:"addr" default:":8080"`
-	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
-	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// 1. Subscribe to NATS events (Go Cloud PubSub with JetStream)
-⋮----
-// 2. Use RemoteTaskManager to proxy Submit/Get/List to the Manager
-⋮----
-// 3. Subscribe to NATS events via Go Cloud and pump to SSE Hub
-⋮----
-var ev models.TaskEvent
-</file>
-
-<file path="patterns/p06/cmd/manager/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"net/http"
-	"time"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"net/http"
-"time"
-"github.com/jackc/pgx/v5/pgxpool"
-"github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
-pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr        string `envconfig:"addr" default:":8081"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://localhost:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// 1. Setup Postgres
-⋮----
-// 2. Setup NATS JetStream infrastructure
-⋮----
-// 3. Setup NATS (Go Cloud PubSub with JetStream)
-⋮----
-// Start dispatcher to receive worker events
-⋮----
-// Event bridge for publishing to APIs (manager republishes worker events)
-⋮----
-// 4. Setup Manager
-⋮----
-// 5. Serve Manager API
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
-⋮----
-var task models.Task
-</file>
-
-<file path="patterns/p06/cmd/worker/main.go">
-package main
-import (
-	"context"
-	"log"
-	"net/http"
-	"os/signal"
-	"syscall"
-	"time"
-	"github.com/kelseyhightower/envconfig"
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/executor"
-)
-⋮----
-"context"
-"log"
-"net/http"
-"os/signal"
-"syscall"
-"time"
-"github.com/kelseyhightower/envconfig"
-pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-"work-distribution-patterns/shared/executor"
-⋮----
-type config struct {
-	NATSURL          string `envconfig:"nats_url" default:"nats://localhost:4222"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// 1. Setup Transport (Go Cloud PubSub with JetStream)
-⋮----
-// 2. Run Worker Loop
-⋮----
-// Start a simple health check server
-</file>
-
 <file path="patterns/p06/internal/postgres/store.go">
 package pgstore
 import (
@@ -1643,55 +1494,6 @@ func (d *PubSubDispatcher) Dispatch(ctx context.Context, task models.Task) error
 func (d *PubSubDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 // Shutdown closes the underlying Go Cloud resources.
 func (d *PubSubDispatcher) Shutdown(ctx context.Context)
-</file>
-
-<file path="patterns/p06/internal/pubsub/setup.go">
-package pubsubinternal
-import (
-	"context"
-	"github.com/nats-io/nats.go"
-	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
-	"gocloud.dev/pubsub"
-)
-⋮----
-"context"
-"github.com/nats-io/nats.go"
-_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
-"gocloud.dev/pubsub"
-⋮----
-// EnsureJetStream creates the necessary JetStream streams for the application.
-// This is called once on startup by the manager to initialize infrastructure.
-func EnsureJetStream(natsURL string) error
-⋮----
-// Create TASKS stream for work distribution
-⋮----
-// Create EVENTS stream for event streaming
-⋮----
-// OpenManagerResources initializes Go Cloud resources for the manager using JetStream URLs.
-// Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
-func OpenManagerResources(ctx context.Context, natsURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error)
-⋮----
-// Topic for publishing tasks to workers (JetStream-backed)
-// Stream is auto-created by the driver
-⋮----
-// Subscription for receiving worker events (durable JetStream consumer)
-// Durable consumer ensures crash recovery
-⋮----
-// Topic for publishing events to APIs (JetStream-backed for replay capability)
-⋮----
-// OpenWorkerResources initializes Go Cloud resources for workers using JetStream URLs.
-func OpenWorkerResources(ctx context.Context, natsURL string) (*pubsub.Subscription, *pubsub.Topic, error)
-⋮----
-// Subscription for receiving tasks (durable JetStream consumer)
-// Durable consumer ensures crash recovery; work distribution happens automatically
-⋮----
-// Topic for publishing worker events (JetStream-backed)
-⋮----
-// OpenAPIResources initializes Go Cloud resources for API servers using JetStream URLs.
-func OpenAPIResources(ctx context.Context, natsURL string) (*pubsub.Subscription, error)
-⋮----
-// Subscription for API events (ephemeral consumer - all API instances receive all events for SSE fan-out)
-// No durable name means each API instance gets its own consumer
 </file>
 
 <file path="shared/sse/client.go">
@@ -2044,6 +1846,153 @@ func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error
 func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 </file>
 
+<file path="patterns/p06/cmd/api/main.go">
+package main
+import (
+	"context"
+	"encoding/json"
+	"html/template"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"encoding/json"
+"html/template"
+"log"
+"github.com/kelseyhightower/envconfig"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	BrokerURL  string `envconfig:"broker_url" default:"nats://localhost:4222"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// 1. Subscribe to broker events (Go Cloud PubSub)
+⋮----
+// 2. Use RemoteTaskManager to proxy Submit/Get/List to the Manager
+⋮----
+// 3. Subscribe to broker events via Go Cloud and pump to SSE Hub
+⋮----
+var ev models.TaskEvent
+</file>
+
+<file path="patterns/p06/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	BrokerURL   string `envconfig:"broker_url" default:"nats://localhost:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// 1. Setup Postgres
+⋮----
+// 2. Setup PubSub (Go Cloud with NATS/RabbitMQ)
+⋮----
+// Start dispatcher to receive worker events
+⋮----
+// Event bridge for publishing to APIs (manager republishes worker events)
+⋮----
+// 4. Setup Manager
+⋮----
+// 5. Serve Manager API
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p06/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"net/http"
+"os/signal"
+"syscall"
+"time"
+"github.com/kelseyhightower/envconfig"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/executor"
+⋮----
+type config struct {
+	BrokerURL        string `envconfig:"broker_url" default:"nats://localhost:4222"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// 1. Setup Transport (Go Cloud PubSub)
+⋮----
+// 2. Run Worker Loop
+⋮----
+// Start a simple health check server
+</file>
+
 <file path="tests/load/load.go">
 // load is a configurable load test tool for the work-distribution-patterns API.
 // Run: go run ./tests/load/load.go -url http://localhost:8080
@@ -2137,6 +2086,61 @@ func main()
 var cfg config
 ⋮----
 // Subscribe directly to NATS for events (distributed pub/sub).
+</file>
+
+<file path="patterns/p06/internal/pubsub/setup.go">
+package pubsubinternal
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
+	"gocloud.dev/pubsub"
+	_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
+)
+⋮----
+"context"
+"fmt"
+"os"
+"strings"
+"time"
+_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
+"gocloud.dev/pubsub"
+_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
+⋮----
+// OpenManagerResources initializes Go Cloud resources for the manager.
+// Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
+func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error)
+⋮----
+var tasksTopicURL, eventsSubURL, apiEventsTopicURL string
+⋮----
+// NATS JetStream URLs
+⋮----
+// Kafka URLs (connection from KAFKA_BROKERS env var)
+// For topics, the path is the topic name
+// For subscriptions: kafka://consumer-group?topic=topic-name
+// Separate topics to avoid feedback loop: workers→worker_events, manager→api_events
+⋮----
+// OpenWorkerResources initializes Go Cloud resources for workers.
+func OpenWorkerResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, *pubsub.Topic, error)
+⋮----
+var tasksSubURL, eventsTopicURL string
+⋮----
+// Workers share tasks via consumer group "workers"
+⋮----
+// OpenAPIResources initializes Go Cloud resources for API servers.
+func OpenAPIResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, error)
+⋮----
+var eventsSubURL string
+⋮----
+// NATS JetStream URL (ephemeral consumer)
+⋮----
+// Each API instance uses its hostname as unique consumer group (auto-scales)
+// Docker/K8s automatically assigns unique hostnames like p06-api-1, p06-api-2, etc.
+⋮----
+// Fallback: generate unique ID if hostname fails
 </file>
 
 <file path="shared/contracts/consumer.go">
