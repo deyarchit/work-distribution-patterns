@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // baseURL returns the target API base URL (default: http://localhost:8080).
@@ -157,4 +158,86 @@ func getTask(t *testing.T, id string) taskResponse {
 		t.Fatalf("decode task: %v", err)
 	}
 	return tr
+}
+
+// collectedEvents contains the result of event collection.
+type collectedEvents struct {
+	EventCounts   map[string]int            // eventType -> count (for single task)
+	PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
+	StatusSeq     []string                  // sequence of status events
+	SeenCompleted bool                      // whether task_status=completed was seen
+}
+
+// collectEventsUntilQuiet collects events from the SSE channel for the specified task IDs
+// until no events are received for the quietDuration. Returns collected event data.
+func collectEventsUntilQuiet(ctx context.Context, t *testing.T, events <-chan SSEEvent, taskIDs []string, quietDuration time.Duration) collectedEvents {
+	t.Helper()
+
+	idSet := make(map[string]bool)
+	for _, id := range taskIDs {
+		idSet[id] = true
+	}
+
+	result := collectedEvents{
+		EventCounts: make(map[string]int),
+		PerTask:     make(map[string]map[string]int),
+		StatusSeq:   []string{},
+	}
+
+	seenEvents := make(map[string]bool) // for duplicate detection
+	quiescenceTimer := time.NewTimer(quietDuration)
+	defer quiescenceTimer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timeout waiting for events")
+		case <-quiescenceTimer.C:
+			// Quiescence reached - all events collected
+			return result
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("SSE stream closed unexpectedly")
+			}
+			// Filter to our task IDs only
+			if !idSet[ev.TaskID] {
+				continue
+			}
+
+			// Reset quiescence timer on each new event
+			if !quiescenceTimer.Stop() {
+				select {
+				case <-quiescenceTimer.C:
+				default:
+				}
+			}
+			quiescenceTimer.Reset(quietDuration)
+
+			// Check for duplicates
+			eventSig := fmt.Sprintf("%s:%s:%s:%d:%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
+			if seenEvents[eventSig] {
+				t.Errorf("DUPLICATE event detected: %s", eventSig)
+			}
+			seenEvents[eventSig] = true
+
+			// Track overall event counts (for single task tests)
+			result.EventCounts[ev.Type]++
+
+			// Track per-task event counts (for concurrent task tests)
+			if result.PerTask[ev.TaskID] == nil {
+				result.PerTask[ev.TaskID] = make(map[string]int)
+			}
+			result.PerTask[ev.TaskID][ev.Type]++
+
+			// Track status sequence
+			if ev.Type == "task_status" {
+				result.StatusSeq = append(result.StatusSeq, ev.Status)
+				if ev.Status == "completed" {
+					result.SeenCompleted = true
+				}
+			}
+
+			t.Logf("event: task=%s type=%s status=%s progress=%d stage=%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
+		}
+	}
 }

@@ -1,10 +1,10 @@
-<!-- Commit: 9e8e54c814d7beab20c8bdde9ad160e2bad59fa3 | Files scanned: 58 | Token estimate: ~1050 -->
+<!-- Commit: 8a14f57021b0551a79c6ad997673258aca34e75f | Files scanned: 71 | Token estimate: ~1200 -->
 
 # Architecture
 
 ## Overview
 
-Five patterns demonstrating different work distribution topologies, all sharing the same HTTP API surface and HTMX frontend.
+Six patterns demonstrating different work distribution topologies, all sharing the same HTTP API surface and HTMX frontend.
 
 ## Shared Interfaces
 
@@ -33,6 +33,7 @@ Event streaming is wired explicitly in `main.go`: managers publish to `TaskEvent
 | P3 | :8080 | :8081 | separate process | WebSocket push |
 | P4 | :8080 | :8081 | separate process | gRPC bidirectional stream |
 | P5 | :8080 (×3) | :8081 (×1) | separate process (×3) | NATS JetStream |
+| P6 | :8080 (×3) | :8081 (×1) | separate process (×3) | gocloud PubSub (JetStream) |
 
 ## Three-Layer Structure
 
@@ -132,4 +133,29 @@ Browser ◄── GET /events ◄── NATS sub (task.events.*) ─────
 - APIs subscribe directly to NATS `task.events.*` (no SSE hub needed); Manager republishes to this bus after processing worker events.
 - Store: `pgstore.Store` (PostgreSQL — shared across replicas); Deadline: 30 s re-dispatch
 - NATS used for both queueing (JetStream tasks.new) and event streaming (Core worker.events.* and task.events.*)
+- Env (API): `MANAGER_URL`, `NATS_URL`; Env (manager): `NATS_URL`, `DATABASE_URL`
+
+## Pattern 6: Cloud-Agnostic PubSub (gocloud abstraction)
+
+```
+Browser ──POST /tasks──► nginx ──► API replica (:8080) ──► RemoteTaskManager.Submit ──► POST /tasks ──► Manager (:8081)
+                                       │                                                                       │ CloudDispatcher.Dispatch
+Browser ◄── GET /events ◄── gocloud.Receive (events.api) ─────┐    JetStream (tasks.new)
+                                      (SSE hub pump)              │              │
+                                                           CloudBridge       │
+                                                                  ▲          │
+                                                                  │     Worker CloudConsumer.Receive()
+                                                                  │     exec.Run → Emit → events.workers
+                                                                  │             │
+                                      Manager.runEventLoop → PostgreSQL ──────┘
+                                                 ▲
+                                                 └──────────────────────────────────────────────────────────┘
+```
+
+- **Abstraction**: `gocloud.dev/pubsub` wraps NATS JetStream; all patterns use same code, works with AWS SNS/SQS, Google Pub/Sub, etc.
+- Two JetStream streams: TASKS (WorkQueue retention, file storage), EVENTS (Interest retention, memory storage)
+- API replicas use SSE hub fed by `gocloud.Receive` pump; Manager owns `CloudDispatcher`, `CloudBridge`, postgres
+- URLs use gocloud scheme: `nats://localhost:4222/tasks.new?stream_name=TASKS`, `/events.api?stream_name=EVENTS`
+- Durable consumers: manager (`manager-events`), workers (shared `workers` consumer), APIs (ephemeral per instance)
+- Store: `pgstore.Store` (PostgreSQL); Deadline: 30 s re-dispatch
 - Env (API): `MANAGER_URL`, `NATS_URL`; Env (manager): `NATS_URL`, `DATABASE_URL`

@@ -39,7 +39,7 @@ func main() {
 	hub := sse.NewHub()
 
 	// Subscribe directly to NATS for events (distributed pub/sub).
-	bus := events.NewNATSBridge(nc)
+	bus := events.NewNATSBridge(nc, "task.events")
 	ch, _ := bus.Subscribe(ctx)
 	go func() {
 		for ev := range ch {

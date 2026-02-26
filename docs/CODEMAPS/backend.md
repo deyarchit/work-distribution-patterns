@@ -1,4 +1,4 @@
-<!-- Commit: 9e8e54c814d7beab20c8bdde9ad160e2bad59fa3 | Files scanned: 60 | Token estimate: ~980 -->
+<!-- Commit: 8a14f57021b0551a79c6ad997673258aca34e75f | Files scanned: 72 | Token estimate: ~1100 -->
 
 # Backend Codemap
 
@@ -24,6 +24,8 @@
 | `p04/proto` | `work.proto`, `work.pb.go`, `work_grpc.pb.go` | Protocol buffer definitions for gRPC messages; auto-generated bindings |
 | `p05/internal/nats` (pkg `natsinternal`) | `dispatcher.go`, `consumer.go`, `setup.go` | `NATSDispatcher`, `NATSConsumer`, JetStream stream setup |
 | `p05/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
+| `p06/internal/pubsub` (pkg `pubsubinternal`) | `dispatcher.go`, `consumer.go`, `bridge.go`, `setup.go` | `CloudDispatcher`, `CloudConsumer`, `CloudBridge`; gocloud.dev/pubsub abstraction; JetStream stream setup |
+| `p06/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore` (same as P5) |
 
 ## API Routes (`shared/api`)
 
@@ -95,3 +97,5 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
 **Pattern 4** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `gRPCDispatcher`, `MemoryBridge`, and MemoryStore. Manager pumps `MemoryBridge` to SSE hub; API subscribes via `sse.Client`. `gRPCDispatcher.Start` listens for gRPC connections on configured address; `Dispatch` sends tasks over established streams. `gRPCConsumer` maintains persistent bidirectional stream with manager, emits events as gRPC messages. Manager republishes events to MemoryBridge. Deadline disabled. Uses protobuf-generated code from `work.proto`.
 
 **Pattern 5** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager always republishes events to `NATSBridge` after processing worker events. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup.
+
+**Pattern 6** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). Uses `gocloud.dev/pubsub` (with nats.go driver via `github.com/pitabwire/natspubsub`). API uses `shared/client.RemoteTaskManager` + `CloudBridge` to subscribe to `events.api` stream. Manager owns `CloudDispatcher`, `CloudBridge`, postgres. Two JetStream streams: TASKS (WorkQueue retention, file storage) and EVENTS (Interest retention, memory storage). Manager re-dispatches at 30 s deadline. Store is `pgstore.Store` backed by PostgreSQL. Durable consumers ensure crash recovery: manager uses `manager-events` consumer, workers share `workers` consumer, APIs use ephemeral consumers (one per instance).

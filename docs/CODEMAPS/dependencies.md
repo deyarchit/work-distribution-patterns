@@ -1,4 +1,4 @@
-<!-- Commit: 9e8e54c814d7beab20c8bdde9ad160e2bad59fa3 | Files scanned: 18 | Token estimate: ~700 -->
+<!-- Commit: 8a14f57021b0551a79c6ad997673258aca34e75f | Files scanned: 28 | Token estimate: ~900 -->
 
 # Dependencies & Configuration
 
@@ -14,6 +14,8 @@
 | `github.com/jackc/pgx/v5` | v5.8.0 | PostgreSQL driver + `pgxpool` connection pool (Pattern 5) |
 | `github.com/google/uuid` | v1.6.0 | Task ID generation |
 | `github.com/kelseyhightower/envconfig` | v1.4.0 | Struct-based env config loading (all patterns) |
+| `gocloud.dev` | v0.41.0 | Cloud-agnostic abstraction for pub/sub (Pattern 6) |
+| `github.com/pitabwire/natspubsub` | v0.0.x | NATS JetStream driver for gocloud (Pattern 6) |
 
 ## Environment Variables
 
@@ -78,21 +80,36 @@ No sticky sessions: API replicas subscribe directly to NATS `task.events.*` for 
 Manager uses `NATSBridge` to publish events; `pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
 **Note:** `nats.conf` is required — NATS 2.12+ defaults `Max Storage: 0 B` without explicit config.
 
+### Pattern 6 — Docker Compose (`patterns/p06`)
+```
+[nginx]        ← patterns/p06/nginx/nginx.conf   (port 8080 → upstream api)
+  ├─ [api ×3] ← patterns/p06/Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
+[manager ×1]   ← patterns/p06/Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns CloudDispatcher, postgres, SSE hub)
+[worker ×3]    ← patterns/p06/Dockerfile.worker   (NATS_URL, MAX_STAGE_DURATION)
+[nats]         ← nats:latest + patterns/p06/nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
+               ← named volume: nats-jetstream (persistent across restarts)
+[postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
+```
+
+API replicas use SSE hub fed by gocloud pubsub pump; no sticky sessions. Manager owns all pub/sub connections. Uses gocloud-specific URLs: `nats://nats:4222/tasks.new?stream_name=TASKS`, `/events.api?stream_name=EVENTS`. Two streams: TASKS (WorkQueue, file storage), EVENTS (Interest, memory storage). Durable consumers: manager (`manager-events`), workers (shared `workers`), APIs (ephemeral).
+
 ## Build Targets
 
 ```bash
-make build-all      # builds all 13 binaries into bin/
+make build-all      # builds all 16 binaries into bin/
                     #   p1-server,
                     #   p2-api, p2-manager, p2-worker,
                     #   p3-api, p3-manager, p3-worker,
                     #   p4-api, p4-manager, p4-worker,
-                    #   p5-api, p5-manager, p5-worker
+                    #   p5-api, p5-manager, p5-worker,
+                    #   p6-api, p6-manager, p6-worker
 make run-p1         # local run, no Docker
 make run-p2         # docker compose up (Pattern 2: REST polling)
 make run-p3         # docker compose up (Pattern 3: WebSocket hub)
 make run-p4         # docker compose up (Pattern 4: gRPC bidirectional)
 make run-p5         # docker compose up (Pattern 5: Queue-and-Store)
-make test-all       # build-all + E2E tests against all 5 patterns
+make run-p6         # docker compose up (Pattern 6: Cloud-Agnostic PubSub)
+make test-all       # build-all + E2E tests against all 6 patterns
 make test-e2e       # E2E tests against BASE_URL (default :8080)
 make test-load      # load test against BASE_URL
 ```

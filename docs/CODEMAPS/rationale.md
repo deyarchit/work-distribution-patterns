@@ -1,5 +1,21 @@
 # Codemap Rationale Log
 
+## 8a14f57 — 2026-02-26
+Commits: `3a7f9b2..8a14f57` (Add new pattern: Queues via gocloud abstraction)
+
+### Decisions
+- **Pattern 6: Cloud-Agnostic PubSub via gocloud.dev abstraction**: Extends P5 (NATS JetStream) by wrapping pub/sub behind `gocloud.dev/pubsub` interface. Same business logic; different transport abstraction. APIs and workers use identical code to work with AWS SNS/SQS, Google Pub/Sub, Azure Service Bus, or NATS JetStream. Demonstrates how cloud-agnostic patterns reduce vendor lock-in and cost.
+- **Two JetStream streams**: TASKS (WorkQueue retention, file storage for reliability) and EVENTS (Interest retention, memory storage for ephemeral event fan-out). Separates durable queueing from transient messaging.
+- **Durable consumers with separate strategies**: Manager uses `manager-events` consumer (durable, for crash recovery); workers share `workers` consumer (durable, work-stealing); API replicas use ephemeral consumers (one per instance, simple fan-out).
+- **Transport URLs abstraction**: gocloud scheme `nats://localhost:4222/tasks.new?stream_name=TASKS` encapsulates JetStream specifics. Swapping NATS for another backend requires only URL + driver change in one place, not rewriting dispatcher/consumer logic.
+
+## 3a7f9b2 — 2026-02-26
+Commits: `473fff3..3a7f9b2` (Refactor TaskEventBus interface and implementations)
+
+### Decisions
+- **Updated `TaskEventBus` split to include P6**: Extended the Publisher/Subscriber/Bridge interface hierarchy (introduced in 9e8e54c) to P6's `CloudBridge` implementation. All six patterns now consistently use the split interface approach.
+- **`CloudBridge` implements `TaskEventBridge`**: Like `MemoryBridge` (P1–P4) and `NATSBridge` (P5), the new `CloudBridge` satisfies both Publisher and Subscriber, enabling Manager dependency injection without caring about the underlying pub/sub implementation.
+
 ## 9e8e54c — 2026-02-25
 Commits: `473fff3..9e8e54c` (Refactor TaskEventBus interface and implementations)
 

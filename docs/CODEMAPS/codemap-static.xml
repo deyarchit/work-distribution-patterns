@@ -68,6 +68,23 @@ patterns/
       postgres/
         store.go
     nginx/
+  p06/
+    cmd/
+      api/
+        main.go
+      manager/
+        main.go
+      worker/
+        main.go
+    internal/
+      postgres/
+        store.go
+      pubsub/
+        bridge.go
+        consumer.go
+        dispatcher.go
+        setup.go
+    nginx/
 shared/
   api/
     handlers.go
@@ -1300,6 +1317,383 @@ var status string
 var stagesJSON string
 </file>
 
+<file path="patterns/p06/cmd/api/main.go">
+package main
+import (
+	"context"
+	"encoding/json"
+	"html/template"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"encoding/json"
+"html/template"
+"log"
+"github.com/kelseyhightower/envconfig"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// 1. Subscribe to NATS events (Go Cloud PubSub with JetStream)
+⋮----
+// 2. Use RemoteTaskManager to proxy Submit/Get/List to the Manager
+⋮----
+// 3. Subscribe to NATS events via Go Cloud and pump to SSE Hub
+⋮----
+var ev models.TaskEvent
+</file>
+
+<file path="patterns/p06/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://localhost:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// 1. Setup Postgres
+⋮----
+// 2. Setup NATS JetStream infrastructure
+⋮----
+// 3. Setup NATS (Go Cloud PubSub with JetStream)
+⋮----
+// Start dispatcher to receive worker events
+⋮----
+// Event bridge for publishing to APIs (manager republishes worker events)
+⋮----
+// 4. Setup Manager
+⋮----
+// 5. Serve Manager API
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p06/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
+	"github.com/kelseyhightower/envconfig"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"net/http"
+"os/signal"
+"syscall"
+"time"
+"github.com/kelseyhightower/envconfig"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/executor"
+⋮----
+type config struct {
+	NATSURL          string `envconfig:"nats_url" default:"nats://localhost:4222"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// 1. Setup Transport (Go Cloud PubSub with JetStream)
+⋮----
+// 2. Run Worker Loop
+⋮----
+// Start a simple health check server
+</file>
+
+<file path="patterns/p06/internal/postgres/store.go">
+package pgstore
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"work-distribution-patterns/shared/models"
+)
+⋮----
+"context"
+"encoding/json"
+"fmt"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"work-distribution-patterns/shared/models"
+⋮----
+const schema = `
+CREATE TABLE IF NOT EXISTS tasks (
+	id            TEXT        PRIMARY KEY,
+	name          TEXT        NOT NULL,
+	status        TEXT        NOT NULL,
+	stages        JSONB       NOT NULL,
+	submitted_at  TIMESTAMPTZ NOT NULL,
+	dispatched_at TIMESTAMPTZ,
+	completed_at  TIMESTAMPTZ
+)`
+// Store implements store.TaskStore against PostgreSQL.
+type Store struct {
+	pool *pgxpool.Pool
+}
+// New creates a Store and runs the schema migration.
+func New(ctx context.Context, pool *pgxpool.Pool) (*Store, error)
+func (s *Store) Create(task models.Task) error
+func (s *Store) Get(id string) (models.Task, bool)
+func (s *Store) List() []models.Task
+⋮----
+var tasks []models.Task
+⋮----
+func (s *Store) SetStatus(id string, status models.TaskStatus) error
+⋮----
+var completedAt *time.Time
+⋮----
+func (s *Store) SetDispatchedAt(id string, t time.Time) error
+// scanner abstracts pgx.Row and pgx.Rows so scanTask works for both.
+type scanner interface {
+	Scan(dest ...any) error
+}
+func scanTask(s scanner) (models.Task, error)
+⋮----
+var t models.Task
+var status string
+var stagesJSON string
+</file>
+
+<file path="patterns/p06/internal/pubsub/bridge.go">
+package pubsubinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"work-distribution-patterns/shared/models"
+	"gocloud.dev/pubsub"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+"work-distribution-patterns/shared/models"
+"gocloud.dev/pubsub"
+⋮----
+// PubSubEventBridge implements TaskEventPublisher using Go Cloud PubSub.
+type PubSubEventBridge struct {
+	topic *pubsub.Topic
+}
+// NewPubSubEventBridge creates an event bridge from a pubsub.Topic.
+func NewPubSubEventBridge(topic *pubsub.Topic) *PubSubEventBridge
+// Publish sends an event to the topic (for manager→API event broadcasting).
+func (b *PubSubEventBridge) Publish(event models.TaskEvent)
+</file>
+
+<file path="patterns/p06/internal/pubsub/consumer.go">
+package pubsubinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+	"gocloud.dev/pubsub"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+"gocloud.dev/pubsub"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskConsumer = (*PubSubConsumer)(nil)
+// PubSubConsumer implements TaskConsumer over Go Cloud PubSub.
+type PubSubConsumer struct {
+	tasksSub    *pubsub.Subscription
+	eventsTopic *pubsub.Topic
+}
+// NewPubSubConsumer creates a PubSubConsumer.
+func NewPubSubConsumer(tasksSub *pubsub.Subscription, eventsTopic *pubsub.Topic) *PubSubConsumer
+// Connect is a no-op as Go Cloud handles connection state internally.
+func (c *PubSubConsumer) Connect(_ context.Context) error
+// Receive blocks until a task is available from the subscription.
+func (c *PubSubConsumer) Receive(ctx context.Context) (models.Task, error)
+⋮----
+var task models.Task
+⋮----
+msg.Ack() // Ack bad messages so they don't clog the queue.
+⋮----
+// For work distribution, we acknowledge after receiving.
+// In a real system, we might want to use at-least-once delivery with
+// acknowledgement only after successful processing, but following
+// the pattern in P5 for consistency.
+⋮----
+// Emit publishes a TaskEvent to the events topic.
+func (c *PubSubConsumer) Emit(ctx context.Context, event models.TaskEvent) error
+// Shutdown closes the underlying Go Cloud resources.
+func (c *PubSubConsumer) Shutdown(ctx context.Context)
+</file>
+
+<file path="patterns/p06/internal/pubsub/dispatcher.go">
+package pubsubinternal
+import (
+	"context"
+	"encoding/json"
+	"log"
+	dispatch "work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/models"
+	"gocloud.dev/pubsub"
+)
+⋮----
+"context"
+"encoding/json"
+"log"
+dispatch "work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/models"
+"gocloud.dev/pubsub"
+⋮----
+// Compile-time interface check.
+var _ dispatch.TaskDispatcher = (*PubSubDispatcher)(nil)
+// PubSubDispatcher implements TaskDispatcher using Go Cloud PubSub topics and subscriptions.
+type PubSubDispatcher struct {
+	tasksTopic     *pubsub.Topic
+	eventsSub      *pubsub.Subscription
+	internalEvents chan models.TaskEvent
+}
+// NewPubSubDispatcher creates a PubSubDispatcher.
+func NewPubSubDispatcher(tasksTopic *pubsub.Topic, eventsSub *pubsub.Subscription) *PubSubDispatcher
+// Start launches a background goroutine to drain the events subscription.
+func (d *PubSubDispatcher) Start(ctx context.Context) error
+func (d *PubSubDispatcher) receiveLoop(ctx context.Context)
+⋮----
+// Context cancellation or subscription error.
+⋮----
+var ev models.TaskEvent
+⋮----
+// Acknowledge receipt.
+⋮----
+// Block briefly for terminal events to ensure they are processed.
+⋮----
+// Non-blocking for progress updates.
+⋮----
+// Dispatch publishes the task to the tasks topic.
+func (d *PubSubDispatcher) Dispatch(ctx context.Context, task models.Task) error
+// ReceiveEvent blocks until a worker event is available.
+func (d *PubSubDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
+// Shutdown closes the underlying Go Cloud resources.
+func (d *PubSubDispatcher) Shutdown(ctx context.Context)
+</file>
+
+<file path="patterns/p06/internal/pubsub/setup.go">
+package pubsubinternal
+import (
+	"context"
+	"github.com/nats-io/nats.go"
+	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
+	"gocloud.dev/pubsub"
+)
+⋮----
+"context"
+"github.com/nats-io/nats.go"
+_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
+"gocloud.dev/pubsub"
+⋮----
+// EnsureJetStream creates the necessary JetStream streams for the application.
+// This is called once on startup by the manager to initialize infrastructure.
+func EnsureJetStream(natsURL string) error
+⋮----
+// Create TASKS stream for work distribution
+⋮----
+// Create EVENTS stream for event streaming
+⋮----
+// OpenManagerResources initializes Go Cloud resources for the manager using JetStream URLs.
+// Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
+func OpenManagerResources(ctx context.Context, natsURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error)
+⋮----
+// Topic for publishing tasks to workers (JetStream-backed)
+// Stream is auto-created by the driver
+⋮----
+// Subscription for receiving worker events (durable JetStream consumer)
+// Durable consumer ensures crash recovery
+⋮----
+// Topic for publishing events to APIs (JetStream-backed for replay capability)
+⋮----
+// OpenWorkerResources initializes Go Cloud resources for workers using JetStream URLs.
+func OpenWorkerResources(ctx context.Context, natsURL string) (*pubsub.Subscription, *pubsub.Topic, error)
+⋮----
+// Subscription for receiving tasks (durable JetStream consumer)
+// Durable consumer ensures crash recovery; work distribution happens automatically
+⋮----
+// Topic for publishing worker events (JetStream-backed)
+⋮----
+// OpenAPIResources initializes Go Cloud resources for API servers using JetStream URLs.
+func OpenAPIResources(ctx context.Context, natsURL string) (*pubsub.Subscription, error)
+⋮----
+// Subscription for API events (ephemeral consumer - all API instances receive all events for SSE fan-out)
+// No durable name means each API instance gets its own consumer
+</file>
+
 <file path="shared/sse/client.go">
 package sse
 import (
@@ -1555,44 +1949,6 @@ func (d *GRPCDispatcher) Dispatch(ctx context.Context, task models.Task) error
 func (d *GRPCDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 </file>
 
-<file path="patterns/p05/cmd/api/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/nats-io/nats.go"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/client"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"github.com/kelseyhightower/envconfig"
-"github.com/nats-io/nats.go"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/client"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr       string `envconfig:"addr" default:":8080"`
-	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
-	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// Subscribe directly to NATS for events (distributed pub/sub).
-</file>
-
 <file path="patterns/p05/internal/nats/consumer.go">
 package natsinternal
 import (
@@ -1745,63 +2101,42 @@ var sr submitResponse
 var tr taskResponse
 </file>
 
-<file path="patterns/p05/cmd/manager/main.go">
+<file path="patterns/p05/cmd/api/main.go">
 package main
 import (
 	"context"
 	"html/template"
 	"log"
-	"net/http"
-	"time"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/nats-io/nats.go"
-	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
-	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
 	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
 	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
 )
 ⋮----
 "context"
 "html/template"
 "log"
-"net/http"
-"time"
-"github.com/jackc/pgx/v5/pgxpool"
 "github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
 "github.com/nats-io/nats.go"
-natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
-pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
 "work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
 "work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
 "work-distribution-patterns/shared/templates"
 ⋮----
 type config struct {
-	Addr        string `envconfig:"addr" default:":8081"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
 }
 func main()
 ⋮----
 var cfg config
 ⋮----
-// Build the router manually — the manager accepts a fully-formed Task
-// (pre-created by the API with models.NewTask) rather than a submit request.
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
-⋮----
-// Accept a fully-formed Task forwarded by the API process.
-⋮----
-var task models.Task
+// Subscribe directly to NATS for events (distributed pub/sub).
 </file>
 
 <file path="shared/contracts/consumer.go">
@@ -1877,33 +2212,6 @@ func (m *MemoryBridge) Publish(event models.TaskEvent)
 // Drop slow consumers
 ⋮----
 func (m *MemoryBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
-</file>
-
-<file path="shared/events/nats.go">
-package events
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"work-distribution-patterns/shared/models"
-	"github.com/nats-io/nats.go"
-)
-⋮----
-"context"
-"encoding/json"
-"fmt"
-"work-distribution-patterns/shared/models"
-"github.com/nats-io/nats.go"
-⋮----
-// NATSBridge implements TaskEventBridge using NATS Core.
-type NATSBridge struct {
-	nc *nats.Conn
-}
-func NewNATSBridge(nc *nats.Conn) *NATSBridge
-func (n *NATSBridge) Publish(event models.TaskEvent)
-func (n *NATSBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
-⋮----
-var ev models.TaskEvent
 </file>
 
 <file path="shared/store/store.go">
@@ -2100,6 +2408,65 @@ var task models.Task
 // Worker WebSocket registration — workers connect here to receive tasks.
 </file>
 
+<file path="patterns/p05/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go"
+	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"log"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/kelseyhightower/envconfig"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"github.com/nats-io/nats.go"
+natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
+⋮----
+// Build the router manually — the manager accepts a fully-formed Task
+// (pre-created by the API with models.NewTask) rather than a submit request.
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+// Accept a fully-formed Task forwarded by the API process.
+⋮----
+var task models.Task
+</file>
+
 <file path="shared/contracts/manager.go">
 package contracts
 import (
@@ -2165,6 +2532,36 @@ type TaskEventBridge interface {
 	TaskEventPublisher
 	TaskEventSubscriber
 }
+</file>
+
+<file path="shared/events/nats.go">
+package events
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"work-distribution-patterns/shared/models"
+	"github.com/nats-io/nats.go"
+)
+⋮----
+"context"
+"encoding/json"
+"fmt"
+"work-distribution-patterns/shared/models"
+"github.com/nats-io/nats.go"
+⋮----
+// NATSBridge implements TaskEventBridge using NATS Core.
+type NATSBridge struct {
+	nc     *nats.Conn
+	prefix string
+}
+func NewNATSBridge(nc *nats.Conn, prefix string) *NATSBridge
+func (n *NATSBridge) Publish(event models.TaskEvent)
+func (n *NATSBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+⋮----
+ch := make(chan models.TaskEvent, 256) // Increased buffer for high concurrency
+⋮----
+var ev models.TaskEvent
 </file>
 
 <file path="shared/sse/hub.go">
@@ -2348,84 +2745,6 @@ func (m *RemoteTaskManager) List(ctx context.Context) []models.Task
 var tasks []models.Task
 </file>
 
-<file path="tests/e2e/helpers_test.go">
-package e2e_test
-import (
-	"bufio"
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os"
-	"strings"
-	"testing"
-)
-⋮----
-"bufio"
-"context"
-"encoding/json"
-"fmt"
-"net/http"
-"os"
-"strings"
-"testing"
-⋮----
-// baseURL returns the target API base URL (default: http://localhost:8080).
-func baseURL() string
-// submitRequest is the POST /tasks body.
-type submitRequest struct {
-	Name       string `json:"name"`
-	StageCount int    `json:"stage_count"`
-}
-// submitResponse is the 202 response from POST /tasks.
-type submitResponse struct {
-	ID string `json:"id"`
-}
-// taskResponse mirrors models.Task for JSON decoding.
-type taskResponse struct {
-	ID     string          `json:"id"`
-	Name   string          `json:"name"`
-	Status string          `json:"status"`
-	Stages []stageResponse `json:"stages"`
-}
-type stageResponse struct {
-	Index int    `json:"index"`
-	Name  string `json:"name"`
-}
-// SSEEvent represents a parsed server-sent event.
-type SSEEvent struct {
-	Type      string `json:"type"`
-	TaskID    string `json:"taskID"`
-	StageName string `json:"stageName"`
-	Progress  int    `json:"progress"`
-	Status    string `json:"status"`
-}
-// SSEClient connects to the /events endpoint and emits parsed events on a channel.
-// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
-// If taskID is empty, connects to /events for global delivery (all tasks).
-// Returns when ctx is cancelled or the connection drops.
-func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent
-⋮----
-resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
-⋮----
-var ev SSEEvent
-⋮----
-// postTask submits a task and returns its ID.
-func postTask(t *testing.T, name string, stageCount int) string
-⋮----
-var sr submitResponse
-⋮----
-// listTasks fetches all tasks from GET /tasks.
-func listTasks(t *testing.T) []taskResponse
-⋮----
-var tasks []taskResponse
-⋮----
-// getTask fetches a task by ID.
-func getTask(t *testing.T, id string) taskResponse
-⋮----
-var tr taskResponse
-</file>
-
 <file path="shared/models/task.go">
 package models
 import (
@@ -2492,74 +2811,117 @@ type Stage struct {
 }
 </file>
 
-<file path="tests/e2e/task_test.go">
+<file path="tests/e2e/helpers_test.go">
 package e2e_test
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
-	"sync"
+	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
 ⋮----
+"bufio"
 "context"
+"encoding/json"
 "fmt"
-"sync"
+"net/http"
+"os"
+"strings"
 "testing"
 "time"
 ⋮----
-// TestSingleTask verifies a 3-stage task emits progress events and reaches completed.
-func TestSingleTask(t *testing.T)
+// baseURL returns the target API base URL (default: http://localhost:8080).
+func baseURL() string
+// submitRequest is the POST /tasks body.
+type submitRequest struct {
+	Name       string `json:"name"`
+	StageCount int    `json:"stage_count"`
+}
+// submitResponse is the 202 response from POST /tasks.
+type submitResponse struct {
+	ID string `json:"id"`
+}
+// taskResponse mirrors models.Task for JSON decoding.
+type taskResponse struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Status string          `json:"status"`
+	Stages []stageResponse `json:"stages"`
+}
+type stageResponse struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+}
+// SSEEvent represents a parsed server-sent event.
+type SSEEvent struct {
+	Type      string `json:"type"`
+	TaskID    string `json:"taskID"`
+	StageName string `json:"stageName"`
+	Progress  int    `json:"progress"`
+	Status    string `json:"status"`
+}
+// SSEClient connects to the /events endpoint and emits parsed events on a channel.
+// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
+// If taskID is empty, connects to /events for global delivery (all tasks).
+// Returns when ctx is cancelled or the connection drops.
+func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent
 ⋮----
-const stageCount = 3
-// Connect SSE BEFORE submitting task to avoid missing events
+resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
+⋮----
+var ev SSEEvent
+⋮----
+// postTask submits a task and returns its ID.
+func postTask(t *testing.T, name string, stageCount int) string
+⋮----
+var sr submitResponse
+⋮----
+// listTasks fetches all tasks from GET /tasks.
+func listTasks(t *testing.T) []taskResponse
+⋮----
+var tasks []taskResponse
+⋮----
+// getTask fetches a task by ID.
+func getTask(t *testing.T, id string) taskResponse
+⋮----
+var tr taskResponse
+⋮----
+// collectedEvents contains the result of event collection.
+type collectedEvents struct {
+	EventCounts   map[string]int            // eventType -> count (for single task)
+	PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
+	StatusSeq     []string                  // sequence of status events
+	SeenCompleted bool                      // whether task_status=completed was seen
+}
+⋮----
+EventCounts   map[string]int            // eventType -> count (for single task)
+PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
+StatusSeq     []string                  // sequence of status events
+SeenCompleted bool                      // whether task_status=completed was seen
+⋮----
+// collectEventsUntilQuiet collects events from the SSE channel for the specified task IDs
+// until no events are received for the quietDuration. Returns collected event data.
+func collectEventsUntilQuiet(ctx context.Context, t *testing.T, events <-chan SSEEvent, taskIDs []string, quietDuration time.Duration) collectedEvents
 ⋮----
 seenEvents := make(map[string]bool) // for duplicate detection
 ⋮----
-// Filter to our task only
+// Quiescence reached - all events collected
 ⋮----
-// Create unique event signature for duplicate detection
+// Filter to our task IDs only
 ⋮----
-// Verify expected event counts
-// Executor emits 2 progress events per stage (start + complete)
+// Reset quiescence timer on each new event
 ⋮----
-// Executor emits 2 status events (running, completed)
+// Check for duplicates
 ⋮----
-// TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
-func TestConcurrentTasks(t *testing.T)
+// Track overall event counts (for single task tests)
 ⋮----
-const numTasks = 3
+// Track per-task event counts (for concurrent task tests)
 ⋮----
-// Connect SSE BEFORE submitting tasks
-⋮----
-// Submit all tasks
-⋮----
-eventCounts := make(map[string]map[string]int) // taskID -> eventType -> count
-seenEvents := make(map[string]bool)            // for duplicate detection across all tasks
-var mu sync.Mutex
-⋮----
-// Track event counts per task
-⋮----
-// Verify event counts for this completed task
-⋮----
-// TestStatusTransitions verifies the task emits SSE status events: running → completed.
-func TestStatusTransitions(t *testing.T)
-⋮----
-const stageCount = 2
-// Connect SSE BEFORE submitting task
-⋮----
-// Immediately check pending (task may have been picked up already)
-⋮----
-// Track status transitions
-⋮----
-// Verify expected status sequence: running → completed
-// Note: pending is never emitted as an SSE event (only stored in DB)
-⋮----
-// Verify event counts
-⋮----
-// Verify final state in storage
-⋮----
-var found *taskResponse
+// Track status sequence
 </file>
 
 <file path="shared/api/server.go">
@@ -2589,6 +2951,65 @@ func NewRouter(
 e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
 ⋮----
 // Attach template to context for HTMX fragment rendering
+</file>
+
+<file path="tests/e2e/task_test.go">
+package e2e_test
+import (
+	"context"
+	"testing"
+	"time"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+⋮----
+"context"
+"testing"
+"time"
+"github.com/stretchr/testify/assert"
+"github.com/stretchr/testify/require"
+⋮----
+// TestSingleTask verifies a 3-stage task emits progress events and reaches completed.
+func TestSingleTask(t *testing.T)
+⋮----
+const stageCount = 3
+// Connect SSE BEFORE submitting task to avoid missing events
+⋮----
+// Collect events until 1 second of silence
+⋮----
+// Verify task reached completed status
+⋮----
+// Executor emits 2 progress events per stage (start + complete)
+⋮----
+// Executor emits 2 status events (running, completed)
+⋮----
+// TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
+func TestConcurrentTasks(t *testing.T)
+⋮----
+const numTasks = 3
+⋮----
+// Connect SSE BEFORE submitting tasks
+⋮----
+// Submit all tasks
+⋮----
+// Verify event counts for each task
+⋮----
+// TestStatusTransitions verifies the task emits SSE status events: running → completed.
+func TestStatusTransitions(t *testing.T)
+⋮----
+const stageCount = 2
+// Connect SSE BEFORE submitting task
+⋮----
+// Immediately check pending (task may have been picked up already)
+⋮----
+// Verify expected status sequence: running → completed
+// Note: pending is never emitted as an SSE event (only stored in DB)
+⋮----
+// Verify event counts
+⋮----
+// Verify final state in storage
+⋮----
+var found *taskResponse
 </file>
 
 <file path="shared/executor/executor.go">

@@ -40,6 +40,13 @@ run-p5:
 stop-p5:
 	docker compose -f patterns/p05/docker-compose.yml down
 
+## Run Pattern 6 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + Redis + nginx)
+run-p6:
+	docker compose -f patterns/p06/docker-compose.yml up --build
+
+stop-p6:
+	docker compose -f patterns/p06/docker-compose.yml down
+
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
 	go clean -testcache && BASE_URL=$(BASE_URL) go test ./tests/e2e/... -v -timeout 120s
@@ -63,10 +70,13 @@ build-all:
 	go build -o bin/p5-api       ./patterns/p05/cmd/api
 	go build -o bin/p5-manager   ./patterns/p05/cmd/manager
 	go build -o bin/p5-worker    ./patterns/p05/cmd/worker
+	go build -o bin/p06-api      ./patterns/p06/cmd/api
+	go build -o bin/p06-manager  ./patterns/p06/cmd/manager
+	go build -o bin/p06-worker   ./patterns/p06/cmd/worker
 
-## Build all binaries and validate all five patterns end-to-end
+## Build all binaries and validate all six patterns end-to-end
 test-all: build-all
-	@echo "==> [1/5] Pattern 1: Local-Channels"
+	@echo "==> [1/6] Pattern 1: Local-Channels"
 	@{ \
 	  ./bin/p1-server & \
 	  until curl -sf http://localhost:8080/tasks > /dev/null 2>&1; do sleep 1; done; \
@@ -74,32 +84,44 @@ test-all: build-all
 	  pkill -f "bin/p1-server" 2>/dev/null || true; \
 	  exit $$RC; \
 	}
-	@echo "==> [2/5] Pattern 2: Pull-REST"
+	@echo "==> [2/6] Pattern 2: Pull-REST"
+	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait && \
+	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p02/docker-compose.yml down; \
+	  docker compose -f patterns/p02/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [3/5] Pattern 3: Push-WebSocket"
+	@echo "==> [3/6] Pattern 3: Push-WebSocket"
+	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait && \
+	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p03/docker-compose.yml down; \
+	  docker compose -f patterns/p03/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [4/5] Pattern 4: Streaming-gRPC"
+	@echo "==> [4/6] Pattern 4: Streaming-gRPC"
+	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait && \
+	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p04/docker-compose.yml down; \
+	  docker compose -f patterns/p04/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [5/5] Pattern 5: Brokered-NATS"
+	@echo "==> [5/6] Pattern 5: Brokered-NATS"
+	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait && \
+	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p05/docker-compose.yml down; \
+	  docker compose -f patterns/p05/docker-compose.yml down > /dev/null 2>&1; \
+	  exit $$RC; \
+	}
+	@echo "==> [6/6] Pattern 6: Cloud-Agnostic (Go Cloud + Redis)"
+	@echo "    Building containers..."
+	@{ \
+	  docker compose -f patterns/p06/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -f patterns/p06/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 
