@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
 	"gocloud.dev/pubsub"
@@ -104,14 +105,14 @@ func OpenAPIResources(ctx context.Context, brokerURL string) (*pubsub.Subscripti
 		eventsSubURL = brokerURL + "/events.api?stream_name=EVENTS"
 
 	case "kafka":
-		// Kafka URL (connection from KAFKA_BROKERS env var)
-		// For subscriptions: kafka://consumer-group?topic=topic-name
-		// Each API instance uses a unique consumer group to receive ALL events (broadcast)
-		apiInstance := os.Getenv("API_INSTANCE")
-		if apiInstance == "" {
-			apiInstance = "1" // default for local development
+		// Each API instance uses its hostname as unique consumer group (auto-scales)
+		// Docker/K8s automatically assigns unique hostnames like p06-api-1, p06-api-2, etc.
+		hostname, err := os.Hostname()
+		if err != nil {
+			// Fallback: generate unique ID if hostname fails
+			hostname = fmt.Sprintf("%d", time.Now().UnixNano())
 		}
-		eventsSubURL = fmt.Sprintf("kafka://api-%s?topic=api_events", apiInstance)
+		eventsSubURL = fmt.Sprintf("kafka://api-%s?topic=api_events", hostname)
 
 	default:
 		return nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
