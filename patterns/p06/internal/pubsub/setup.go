@@ -2,72 +2,52 @@ package pubsubinternal
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 
-	"github.com/nats-io/nats.go"
 	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
 	"gocloud.dev/pubsub"
+	_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
 )
 
-// EnsureJetStream creates the necessary JetStream streams for the application.
-// This is called once on startup by the manager to initialize infrastructure.
-func EnsureJetStream(natsURL string) error {
-	nc, err := nats.Connect(natsURL)
-	if err != nil {
-		return err
-	}
-	defer nc.Close()
-
-	js, err := nc.JetStream()
-	if err != nil {
-		return err
-	}
-
-	// Create TASKS stream for work distribution
-	_, err = js.AddStream(&nats.StreamConfig{
-		Name:      "TASKS",
-		Subjects:  []string{"tasks.>"},
-		Retention: nats.WorkQueuePolicy,
-		Storage:   nats.FileStorage,
-	})
-	if err != nil && err.Error() != "stream name already in use" {
-		return err
-	}
-
-	// Create EVENTS stream for event streaming
-	_, err = js.AddStream(&nats.StreamConfig{
-		Name:      "EVENTS",
-		Subjects:  []string{"events.>"},
-		Retention: nats.InterestPolicy,
-		Storage:   nats.MemoryStorage,
-	})
-	if err != nil && err.Error() != "stream name already in use" {
-		return err
-	}
-
-	return nil
-}
-
-// OpenManagerResources initializes Go Cloud resources for the manager using JetStream URLs.
+// OpenManagerResources initializes Go Cloud resources for the manager.
 // Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
-func OpenManagerResources(ctx context.Context, natsURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error) {
-	// Topic for publishing tasks to workers (JetStream-backed)
-	// Stream is auto-created by the driver
-	tasksTopicURL := natsURL + "/tasks.new?stream_name=TASKS"
+func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error) {
+	scheme := strings.Split(brokerURL, "://")[0]
+
+	var tasksTopicURL, eventsSubURL, apiEventsTopicURL string
+
+	switch scheme {
+	case "nats":
+		// NATS JetStream URLs
+		tasksTopicURL = brokerURL + "/tasks.new?stream_name=TASKS"
+		eventsSubURL = brokerURL + "/events.workers?stream_name=EVENTS&consumer_durable_name=manager-events"
+		apiEventsTopicURL = brokerURL + "/events.api?stream_name=EVENTS"
+
+	case "kafka":
+		// Kafka URLs (connection from KAFKA_BROKERS env var)
+		// For topics, the path is the topic name
+		// For subscriptions: kafka://consumer-group?topic=topic-name
+		// Separate topics to avoid feedback loop: workers→worker_events, manager→api_events
+		tasksTopicURL = "kafka://tasks"
+		eventsSubURL = "kafka://manager?topic=worker_events"
+		apiEventsTopicURL = "kafka://api_events"
+
+	default:
+		return nil, nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
+	}
+
 	tasksTopic, err := pubsub.OpenTopic(ctx, tasksTopicURL)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// Subscription for receiving worker events (durable JetStream consumer)
-	// Durable consumer ensures crash recovery
-	eventsSubURL := natsURL + "/events.workers?stream_name=EVENTS&consumer_durable_name=manager-events"
 	eventsSub, err := pubsub.OpenSubscription(ctx, eventsSubURL)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// Topic for publishing events to APIs (JetStream-backed for replay capability)
-	apiEventsTopicURL := natsURL + "/events.api?stream_name=EVENTS"
 	apiEventsTopic, err := pubsub.OpenTopic(ctx, apiEventsTopicURL)
 	if err != nil {
 		return nil, nil, nil, err
@@ -76,18 +56,34 @@ func OpenManagerResources(ctx context.Context, natsURL string) (*pubsub.Topic, *
 	return tasksTopic, eventsSub, apiEventsTopic, nil
 }
 
-// OpenWorkerResources initializes Go Cloud resources for workers using JetStream URLs.
-func OpenWorkerResources(ctx context.Context, natsURL string) (*pubsub.Subscription, *pubsub.Topic, error) {
-	// Subscription for receiving tasks (durable JetStream consumer)
-	// Durable consumer ensures crash recovery; work distribution happens automatically
-	tasksSubURL := natsURL + "/tasks.new?stream_name=TASKS&consumer_durable_name=workers"
+// OpenWorkerResources initializes Go Cloud resources for workers.
+func OpenWorkerResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, *pubsub.Topic, error) {
+	scheme := strings.Split(brokerURL, "://")[0]
+
+	var tasksSubURL, eventsTopicURL string
+
+	switch scheme {
+	case "nats":
+		// NATS JetStream URLs
+		tasksSubURL = brokerURL + "/tasks.new?stream_name=TASKS&consumer_durable_name=workers"
+		eventsTopicURL = brokerURL + "/events.workers?stream_name=EVENTS"
+
+	case "kafka":
+		// Kafka URLs (connection from KAFKA_BROKERS env var)
+		// For subscriptions: kafka://consumer-group?topic=topic-name
+		// Workers share tasks via consumer group "workers"
+		tasksSubURL = "kafka://workers?topic=tasks"
+		eventsTopicURL = "kafka://worker_events"
+
+	default:
+		return nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
+	}
+
 	tasksSub, err := pubsub.OpenSubscription(ctx, tasksSubURL)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Topic for publishing worker events (JetStream-backed)
-	eventsTopicURL := natsURL + "/events.workers?stream_name=EVENTS"
 	eventsTopic, err := pubsub.OpenTopic(ctx, eventsTopicURL)
 	if err != nil {
 		return nil, nil, err
@@ -96,11 +92,31 @@ func OpenWorkerResources(ctx context.Context, natsURL string) (*pubsub.Subscript
 	return tasksSub, eventsTopic, nil
 }
 
-// OpenAPIResources initializes Go Cloud resources for API servers using JetStream URLs.
-func OpenAPIResources(ctx context.Context, natsURL string) (*pubsub.Subscription, error) {
-	// Subscription for API events (ephemeral consumer - all API instances receive all events for SSE fan-out)
-	// No durable name means each API instance gets its own consumer
-	eventsSubURL := natsURL + "/events.api?stream_name=EVENTS"
+// OpenAPIResources initializes Go Cloud resources for API servers.
+func OpenAPIResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, error) {
+	scheme := strings.Split(brokerURL, "://")[0]
+
+	var eventsSubURL string
+
+	switch scheme {
+	case "nats":
+		// NATS JetStream URL (ephemeral consumer)
+		eventsSubURL = brokerURL + "/events.api?stream_name=EVENTS"
+
+	case "kafka":
+		// Kafka URL (connection from KAFKA_BROKERS env var)
+		// For subscriptions: kafka://consumer-group?topic=topic-name
+		// Each API instance uses a unique consumer group to receive ALL events (broadcast)
+		apiInstance := os.Getenv("API_INSTANCE")
+		if apiInstance == "" {
+			apiInstance = "1" // default for local development
+		}
+		eventsSubURL = fmt.Sprintf("kafka://api-%s?topic=api_events", apiInstance)
+
+	default:
+		return nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
+	}
+
 	eventsSub, err := pubsub.OpenSubscription(ctx, eventsSubURL)
 	if err != nil {
 		return nil, err

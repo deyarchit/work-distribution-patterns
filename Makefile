@@ -40,12 +40,16 @@ run-p5:
 stop-p5:
 	docker compose -f patterns/p05/docker-compose.yml down
 
-## Run Pattern 6 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + Redis + nginx)
+## Run Pattern 6 with Docker Compose (1 manager + 3 APIs + 3 workers + broker + nginx)
+## Use BROKER=nats (default) or BROKER=kafka
+BROKER ?= nats
 run-p6:
-	docker compose -f patterns/p06/docker-compose.yml up --build
+	@echo "Starting Pattern 6 with broker: $(BROKER)"
+	docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml up --build
 
 stop-p6:
-	docker compose -f patterns/p06/docker-compose.yml down
+	@echo "Stopping Pattern 6 with broker: $(BROKER)"
+	docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml down
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
@@ -116,12 +120,20 @@ test-all: build-all
 	  docker compose -f patterns/p05/docker-compose.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [6/6] Pattern 6: Cloud-Agnostic (Go Cloud + Redis)"
+	@echo "==> [6/6] Pattern 6: Cloud-Agnostic (NATS)"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p06/docker-compose.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p06/docker-compose.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down > /dev/null 2>&1; \
+	  exit $$RC; \
+	}
+	@echo "==> [7/7] Pattern 6: Cloud-Agnostic (RabbitMQ)"
+	@echo "    Building containers..."
+	@{ \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.rabbitmq.yml up --build -d --wait --quiet-pull > /dev/null 2>&1 && \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.rabbitmq.yml down > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 

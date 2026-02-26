@@ -1,0 +1,79 @@
+services:
+  nats:
+    image: nats:latest
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # monitoring
+
+  nats-init:
+    image: natsio/nats-box:latest
+    depends_on:
+      - nats
+    command: |
+      sh -c '
+        # Wait for NATS to be ready (retry creating stream until it succeeds)
+        echo "Waiting for NATS server..."
+        sleep 3
+
+        # Create TASKS stream for work distribution (work queue policy)
+        until nats stream add TASKS \
+          --server=nats://nats:4222 \
+          --subjects="tasks.>" \
+          --retention=work \
+          --storage=file \
+          --replicas=1 \
+          --max-msgs=-1 \
+          --max-age=1h \
+          --defaults 2>/dev/null; do
+          echo "Waiting for NATS to be ready..."
+          sleep 1
+        done
+        echo "TASKS stream created"
+
+        # Create EVENTS stream for event streaming (interest policy)
+        nats stream add EVENTS \
+          --server=nats://nats:4222 \
+          --subjects="events.>" \
+          --retention=interest \
+          --storage=memory \
+          --replicas=1 \
+          --max-msgs=-1 \
+          --max-age=1h \
+          --defaults || true
+        echo "EVENTS stream created"
+
+        echo "NATS streams initialized successfully"
+      '
+
+  # Override manager to depend on nats-init
+  manager:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      - ADDR=:8081
+      - BROKER_URL=nats://nats:4222
+      - DATABASE_URL=postgres://tasks:tasks@postgres:5432/tasks?sslmode=disable
+
+  # Override api to depend on nats-init
+  api:
+    depends_on:
+      manager:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      - ADDR=:8080
+      - MANAGER_URL=http://manager:8081
+      - BROKER_URL=nats://nats:4222
+
+  # Override worker to depend on nats-init
+  worker:
+    depends_on:
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      - BROKER_URL=nats://nats:4222

@@ -13,31 +13,18 @@ services:
       timeout: 5s
       retries: 10
 
-  nats:
-    image: nats:latest
-    command: ["-js", "-m", "8222", "-c", "/etc/nats/nats.conf"]
-    ports:
-      - "4222:4222"
-      - "8222:8222" # monitoring
-    volumes:
-      - ./nats.conf:/etc/nats/nats.conf:ro
-
   manager:
     build:
       context: ../..
       dockerfile: patterns/p06/Dockerfile.manager
     environment:
       - ADDR=:8081
-      - NATS_URL=nats://nats:4222
+      - BROKER_URL=${BROKER_URL}
       - DATABASE_URL=postgres://tasks:tasks@postgres:5432/tasks?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
-      nats:
-        condition: service_started
     restart: on-failure
-    deploy:
-      replicas: 3
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
       interval: 2s
@@ -52,12 +39,10 @@ services:
     environment:
       - ADDR=:8080
       - MANAGER_URL=http://manager:8081
-      - NATS_URL=nats://nats:4222
+      - BROKER_URL=${BROKER_URL}
     depends_on:
       manager:
         condition: service_healthy
-      nats:
-        condition: service_started
     restart: on-failure
     deploy:
       replicas: 3
@@ -73,9 +58,7 @@ services:
       context: ../..
       dockerfile: patterns/p06/Dockerfile.worker
     environment:
-      - NATS_URL=nats://nats:4222
-    depends_on:
-      - nats
+      - BROKER_URL=${BROKER_URL}
     restart: on-failure
     deploy:
       replicas: 3

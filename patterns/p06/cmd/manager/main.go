@@ -22,7 +22,7 @@ import (
 
 type config struct {
 	Addr        string `envconfig:"addr" default:":8081"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://localhost:4222"`
+	BrokerURL   string `envconfig:"broker_url" default:"nats://localhost:4222"`
 	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
 }
 
@@ -47,13 +47,8 @@ func main() {
 		log.Fatalf("postgres store: %v", err)
 	}
 
-	// 2. Setup NATS JetStream infrastructure
-	if err := pubsubinternal.EnsureJetStream(cfg.NATSURL); err != nil {
-		log.Fatalf("jetstream setup: %v", err)
-	}
-
-	// 3. Setup NATS (Go Cloud PubSub with JetStream)
-	tasksTopic, workerEventsSub, apiEventsTopic, err := pubsubinternal.OpenManagerResources(ctx, cfg.NATSURL)
+	// 2. Setup PubSub (Go Cloud with NATS/RabbitMQ)
+	tasksTopic, workerEventsSub, apiEventsTopic, err := pubsubinternal.OpenManagerResources(ctx, cfg.BrokerURL)
 	if err != nil {
 		log.Fatalf("pubsub setup: %v", err)
 	}
@@ -111,7 +106,7 @@ func main() {
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
 
-	log.Printf("Pattern 06 (Cloud-Agnostic) Manager listening on %s [nats=%s, postgres=%s]",
-		cfg.Addr, cfg.NATSURL, cfg.DatabaseURL)
+	log.Printf("Pattern 06 (Cloud-Agnostic) Manager listening on %s [broker=%s, postgres=%s]",
+		cfg.Addr, cfg.BrokerURL, cfg.DatabaseURL)
 	log.Fatal(e.Start(cfg.Addr))
 }

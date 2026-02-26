@@ -15,7 +15,7 @@ import (
 )
 
 type config struct {
-	NATSURL          string `envconfig:"nats_url" default:"nats://localhost:4222"`
+	BrokerURL        string `envconfig:"broker_url" default:"nats://localhost:4222"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
 }
 
@@ -28,8 +28,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Setup Transport (Go Cloud PubSub with JetStream)
-	tasksSub, eventsTopic, err := pubsubinternal.OpenWorkerResources(ctx, cfg.NATSURL)
+	// 1. Setup Transport (Go Cloud PubSub)
+	tasksSub, eventsTopic, err := pubsubinternal.OpenWorkerResources(ctx, cfg.BrokerURL)
 	if err != nil {
 		log.Fatalf("pubsub setup: %v", err)
 	}
@@ -40,7 +40,7 @@ func main() {
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	// 2. Run Worker Loop
-	log.Printf("Pattern 06 Worker starting [nats=%s]", cfg.NATSURL)
+	log.Printf("Pattern 06 Worker starting [broker=%s]", cfg.BrokerURL)
 	_ = consumer.Connect(ctx)
 
 	// Start a simple health check server

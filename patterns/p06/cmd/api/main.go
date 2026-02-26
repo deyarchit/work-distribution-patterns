@@ -19,7 +19,7 @@ import (
 type config struct {
 	Addr       string `envconfig:"addr" default:":8080"`
 	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
-	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
+	BrokerURL  string `envconfig:"broker_url" default:"nats://localhost:4222"`
 }
 
 func main() {
@@ -31,8 +31,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 1. Subscribe to NATS events (Go Cloud PubSub with JetStream)
-	eventsSub, err := pubsubinternal.OpenAPIResources(ctx, cfg.NATSURL)
+	// 1. Subscribe to broker events (Go Cloud PubSub)
+	eventsSub, err := pubsubinternal.OpenAPIResources(ctx, cfg.BrokerURL)
 	if err != nil {
 		log.Fatalf("pubsub setup: %v", err)
 	}
@@ -42,7 +42,7 @@ func main() {
 	taskManager := client.NewTaskManager(cfg.ManagerURL)
 	hub := sse.NewHub()
 
-	// 3. Subscribe to NATS events via Go Cloud and pump to SSE Hub
+	// 3. Subscribe to broker events via Go Cloud and pump to SSE Hub
 	go func() {
 		for {
 			msg, err := eventsSub.Receive(ctx)
@@ -69,7 +69,7 @@ func main() {
 	}
 
 	e := api.NewRouter(hub, tpl, taskManager)
-	log.Printf("Pattern 06 (Cloud-Agnostic) API listening on %s [manager=%s, nats=%s]",
-		cfg.Addr, cfg.ManagerURL, cfg.NATSURL)
+	log.Printf("Pattern 06 (Cloud-Agnostic) API listening on %s [manager=%s, broker=%s]",
+		cfg.Addr, cfg.ManagerURL, cfg.BrokerURL)
 	log.Fatal(e.Start(cfg.Addr))
 }
