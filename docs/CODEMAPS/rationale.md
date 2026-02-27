@@ -1,5 +1,13 @@
 # Codemap Rationale Log
 
+## 5154530 — 2026-02-26
+Commits: `7f9d774..5154530` (Add AWS SNS/SQS support to Pattern 6)
+
+### Decisions
+- **AWS SNS/SQS via gocloud abstraction**: Extended Pattern 6's gocloud flexibility to include AWS as a third broker option. SNS/SQS topology uses point-to-point (SQS) for manager↔workers load balancing, and fanout (SNS→SQS) for manager→APIs event distribution. Demonstrates how the same Manager and Worker code works across heterogeneous cloud providers (NATS, Kafka, AWS) without modification.
+- **Dynamic API queue creation**: Unlike NATS (ephemeral consumers) and Kafka (hostname-based consumer groups), AWS SQS requires explicit queue creation. APIs dynamically create their own SQS queues on startup using AWS SDK v2, subscribed to the central SNS topic. This enables true horizontal scaling: operators can add API replicas without pre-configuring queues or updating docker-compose.
+- **LocalStack for local AWS testing**: Uses LocalStack container (`:4566`) to emulate AWS SNS/SQS locally without AWS account dependency, following the pattern established by NATS and Kafka Compose setups. Enables full E2E testing in isolated environments.
+
 ## 8a14f57 — 2026-02-26
 Commits: `3a7f9b2..8a14f57` (Add new pattern: Queues via gocloud abstraction)
 

@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
 	"gocloud.dev/pubsub"
+	_ "gocloud.dev/pubsub/awssnssqs"   // Register awssns:// and awssnssqs:// schemes
 	_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
 )
 
@@ -35,8 +36,27 @@ func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic,
 		eventsSubURL = "kafka://manager?topic=worker_events"
 		apiEventsTopicURL = "kafka://api_events"
 
+	case "awssqs", "awssnssqs":
+		// AWS: SQS for point-to-point, SNS for fanout
+		endpoint := os.Getenv("AWS_ENDPOINT_URL") // http://localstack:4566
+		region := os.Getenv("AWS_REGION")         // us-east-1
+
+		// Strip http:// or https:// from endpoint for gocloud URLs
+		sqsEndpoint := strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
+
+		// Manager publishes tasks to SQS (workers compete for them)
+		tasksTopicURL = fmt.Sprintf("awssqs://%s/000000000000/worker-tasks?region=%s", sqsEndpoint, region)
+
+		// Manager consumes events from SQS (workers publish to it)
+		eventsSubURL = fmt.Sprintf("awssqs://%s/000000000000/manager-events?region=%s", sqsEndpoint, region)
+
+		// Manager publishes to SNS for fanout to APIs
+		// Note the 3 slashes; ARNs have colons and aren't valid as hostnames
+		topicARN := fmt.Sprintf("arn:aws:sns:%s:000000000000:api-events", region)
+		apiEventsTopicURL = fmt.Sprintf("awssns:///%s?region=%s&endpoint=%s", topicARN, region, endpoint)
+
 	default:
-		return nil, nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
+		return nil, nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka, awssqs)", scheme)
 	}
 
 	tasksTopic, err := pubsub.OpenTopic(ctx, tasksTopicURL)
@@ -76,8 +96,22 @@ func OpenWorkerResources(ctx context.Context, brokerURL string) (*pubsub.Subscri
 		tasksSubURL = "kafka://workers?topic=tasks"
 		eventsTopicURL = "kafka://worker_events"
 
+	case "awssqs", "awssnssqs":
+		// AWS: SQS for both tasks and events
+		endpoint := os.Getenv("AWS_ENDPOINT_URL") // http://localstack:4566
+		region := os.Getenv("AWS_REGION")         // us-east-1
+
+		// Strip http:// or https:// from endpoint for gocloud URLs
+		sqsEndpoint := strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
+
+		// Workers consume tasks from SQS (competing with other workers)
+		tasksSubURL = fmt.Sprintf("awssqs://%s/000000000000/worker-tasks?region=%s", sqsEndpoint, region)
+
+		// Workers publish events to SQS (manager is sole consumer)
+		eventsTopicURL = fmt.Sprintf("awssqs://%s/000000000000/manager-events?region=%s", sqsEndpoint, region)
+
 	default:
-		return nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
+		return nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka, awssqs)", scheme)
 	}
 
 	tasksSub, err := pubsub.OpenSubscription(ctx, tasksSubURL)
@@ -114,8 +148,12 @@ func OpenAPIResources(ctx context.Context, brokerURL string) (*pubsub.Subscripti
 		}
 		eventsSubURL = fmt.Sprintf("kafka://api-%s?topic=api_events", hostname)
 
+	case "awssqs", "awssnssqs":
+		// AWS: dynamically create queue and subscription
+		return openAWSAPISubscription(ctx)
+
 	default:
-		return nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka)", scheme)
+		return nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka, awssqs)", scheme)
 	}
 
 	eventsSub, err := pubsub.OpenSubscription(ctx, eventsSubURL)

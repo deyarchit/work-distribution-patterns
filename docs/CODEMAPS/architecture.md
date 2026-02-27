@@ -1,4 +1,4 @@
-<!-- Commit: 7f9d7742a6dc8afe83672e35b34507290d857d48 | Files scanned: 71 | Token estimate: ~1200 -->
+<!-- Commit: 5154530 | Files scanned: 71 | Token estimate: ~1350 -->
 
 # Architecture
 
@@ -152,10 +152,10 @@ Browser ◄── GET /events ◄── gocloud.Receive (events.api) ───�
                                                  └──────────────────────────────────────────────────────────┘
 ```
 
-- **Abstraction**: `gocloud.dev/pubsub` wraps broker (NATS JetStream or Kafka); same code path, swappable via `BROKER` env/make var
-- Two entities (NATS: streams, Kafka: topics): TASKS (queuing, persistent), EVENTS (routing, high throughput)
+- **Abstraction**: `gocloud.dev/pubsub` wraps broker (NATS JetStream, Kafka, or AWS SNS/SQS); same code path, swappable via `BROKER` env/make var
+- Three brokers supported: **NATS** (streams), **Kafka** (topics), **AWS** (SNS/SQS); use point-to-point (SQS) for manager↔workers, fanout (SNS) for manager→APIs
 - API replicas use SSE hub fed by `gocloud.Receive` pump; Manager owns `CloudDispatcher`, `CloudBridge`, postgres
-- gocloud URLs: NATS `nats://localhost:4222/tasks.new?stream_name=TASKS`, Kafka `kafka://localhost:9092/tasks.new`
+- **AWS**: Manager publishes tasks to SQS, APIs dynamically create queues subscribed to SNS topic; workers share SQS queue (load-balanced)
 - Durable consumers: manager, workers (shared), APIs (ephemeral per instance)
 - Store: `pgstore.Store` (PostgreSQL); Deadline: 30 s re-dispatch
-- Env (API): `MANAGER_URL`, `BROKER_URL`; Env (manager): `BROKER_URL`, `DATABASE_URL`
+- Env (API): `MANAGER_URL`, `BROKER_URL`; Env (manager): `BROKER_URL`, `DATABASE_URL`, `AWS_ENDPOINT_URL` (AWS only)

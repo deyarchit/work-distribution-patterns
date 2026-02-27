@@ -1,0 +1,91 @@
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs,sns
+      - DEBUG=1
+      - AWS_DEFAULT_REGION=us-east-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  localstack-init:
+    image: localstack/localstack:latest
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    entrypoint: /bin/bash
+    command: |
+      -c '
+      # LocalStack is already healthy (via depends_on), give it a moment
+      echo "Initializing AWS resources..."
+      sleep 2
+
+      # Create SQS queues for point-to-point communication
+      echo "Creating SQS queues..."
+      awslocal sqs create-queue --queue-name worker-tasks --endpoint-url http://localstack:4566
+      awslocal sqs create-queue --queue-name manager-events --endpoint-url http://localstack:4566
+
+      # Create SNS topic for fanout to API instances
+      echo "Creating SNS topic..."
+      awslocal sns create-topic --name api-events --endpoint-url http://localstack:4566
+
+      # Note: API queues are created dynamically by each API instance on startup
+      # This allows for true auto-scaling without pre-creating queues
+
+      echo "AWS resources initialized successfully"
+      '
+
+  # Override manager to depend on localstack-init
+  manager:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+    environment:
+      - ADDR=:8081
+      - BROKER_URL=awssqs://
+      - DATABASE_URL=postgres://tasks:tasks@postgres:5432/tasks?sslmode=disable
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+
+  # Override api to depend on localstack-init
+  api:
+    depends_on:
+      manager:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+    environment:
+      - ADDR=:8080
+      - MANAGER_URL=http://manager:8081
+      - BROKER_URL=awssqs://
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+
+  # Override worker to depend on localstack-init
+  worker:
+    depends_on:
+      localstack-init:
+        condition: service_completed_successfully
+    environment:
+      - BROKER_URL=awssqs://
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test

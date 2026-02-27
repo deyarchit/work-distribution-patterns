@@ -1,4 +1,4 @@
-<!-- Commit: 7f9d7742a6dc8afe83672e35b34507290d857d48 | Files scanned: 28 | Token estimate: ~900 -->
+<!-- Commit: 5154530 | Files scanned: 28 | Token estimate: ~1050 -->
 
 # Dependencies & Configuration
 
@@ -15,7 +15,11 @@
 | `github.com/google/uuid` | v1.6.0 | Task ID generation |
 | `github.com/kelseyhightower/envconfig` | v1.4.0 | Struct-based env config loading (all patterns) |
 | `gocloud.dev` | v0.41.0 | Cloud-agnostic abstraction for pub/sub (Pattern 6) |
+| `gocloud.dev/pubsub/awssnssqs` | v0.41.0 | AWS SNS/SQS driver for gocloud (Pattern 6 AWS) |
 | `github.com/pitabwire/natspubsub` | v0.0.x | NATS JetStream driver for gocloud (Pattern 6) |
+| `github.com/aws/aws-sdk-go-v2/config` | v1.41+ | AWS SDK v2 config loader (Pattern 6 AWS) |
+| `github.com/aws/aws-sdk-go-v2/service/sns` | v1.39+ | AWS SNS client (Pattern 6 AWS) |
+| `github.com/aws/aws-sdk-go-v2/service/sqs` | v1.42+ | AWS SQS client (Pattern 6 AWS) |
 
 ## Environment Variables
 
@@ -32,7 +36,12 @@ All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `d
 | `MANAGER_URL` (WS) | `ws://localhost:8081/ws/register` | P3 worker | WebSocket registration endpoint on Manager |
 | `GRPC_ADDR` | `:9090` | P4 manager | gRPC server listen address |
 | `NATS_URL` | `nats://127.0.0.1:4222` | P5 API, P5 manager | NATS server URL (API: event subscription; manager: dispatch + events) |
-| `DATABASE_URL` | `postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable` | P5 manager | PostgreSQL connection string |
+| `DATABASE_URL` | `postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable` | P5 manager, P6 manager | PostgreSQL connection string |
+| `BROKER_URL` | `nats://nats:4222` | P6 API, P6 manager, P6 worker | Broker URL for gocloud (nats://, kafka://, or awssqs://) |
+| `AWS_ENDPOINT_URL` | `http://localhost:4566` | P6 (AWS broker only) | LocalStack endpoint for local AWS testing |
+| `AWS_REGION` | `us-east-1` | P6 (AWS broker only) | AWS region (used by SDKv2) |
+| `AWS_ACCESS_KEY_ID` | `test` | P6 (AWS broker only) | AWS access key (dummy for LocalStack) |
+| `AWS_SECRET_ACCESS_KEY` | `test` | P6 (AWS broker only) | AWS secret key (dummy for LocalStack) |
 
 ## Container Topology
 
@@ -86,16 +95,17 @@ Manager uses `NATSBridge` to publish events; `pgstore.Store` (PostgreSQL) is the
   ├─ [api ×3] ← patterns/p06/Dockerfile.api     (MANAGER_URL=http://manager:8081, BROKER_URL=..., depends_on manager healthy)
 [manager ×1]   ← patterns/p06/Dockerfile.manager  (port 8081; BROKER_URL, DATABASE_URL; owns CloudDispatcher, postgres, SSE hub)
 [worker ×3]    ← patterns/p06/Dockerfile.worker   (BROKER_URL, MAX_STAGE_DURATION)
-[broker]       ← NATS (default) or Kafka (configurable via BROKER variable)
-               ← docker-compose.base.yml + docker-compose.nats.yml (or .kafka.yml)
+[broker]       ← NATS (default), Kafka, or LocalStack (for AWS) — configurable via BROKER variable
+               ← docker-compose.base.yml + docker-compose.{nats,kafka,aws}.yml
                ← Named volume: nats-jetstream (NATS only; persistent across restarts)
 [postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
 ```
 
-**Broker Selection:** `make run-p6 BROKER=nats` (default) or `make run-p6 BROKER=kafka`.
-- **NATS:** Uses `gocloud.dev/pubsub/natspubsub` driver; two JetStream streams (TASKS: WorkQueue, EVENTS: Interest)
-- **Kafka:** Uses `gocloud.dev/pubsub/kafkapubsub` driver; same topic-based routing
-- API replicas subscribe directly; no sticky sessions. Manager owns all connections.
+**Broker Selection:** `make run-p6 BROKER=nats` (default), `make run-p6 BROKER=kafka`, or `make run-p6 BROKER=aws`.
+- **NATS:** gocloud `natspubsub` driver; two JetStream streams (TASKS: WorkQueue, EVENTS: Interest); durable consumers (manager, workers)
+- **Kafka:** gocloud `kafkapubsub` driver; topics for tasks and events; consumer groups for load balancing
+- **AWS:** gocloud `awssnssqs` driver + LocalStack; Manager publishes tasks to SQS queue, APIs dynamically create SQS queues subscribed to SNS topic for fanout
+- API replicas subscribe directly; no sticky sessions. Manager owns all connections and state.
 
 ## Build Targets
 
@@ -112,7 +122,7 @@ make run-p2         # docker compose up (Pattern 2: REST polling)
 make run-p3         # docker compose up (Pattern 3: WebSocket hub)
 make run-p4         # docker compose up (Pattern 4: gRPC bidirectional)
 make run-p5         # docker compose up (Pattern 5: Queue-and-Store)
-make run-p6         # docker compose up (Pattern 6: Cloud-Agnostic PubSub; BROKER=nats or kafka, default: nats)
+make run-p6         # docker compose up (Pattern 6: Cloud-Agnostic PubSub; BROKER=nats, kafka, or aws; default: nats)
 make test-all       # build-all + E2E tests against all 6 patterns
 make test-e2e       # E2E tests against BASE_URL (default :8080)
 make test-load      # load test against BASE_URL
