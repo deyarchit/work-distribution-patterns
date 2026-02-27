@@ -17,28 +17,28 @@ run-p2:
 	docker compose -f patterns/p02/docker-compose.yml up --build
 
 stop-p2:
-	docker compose -f patterns/p02/docker-compose.yml down
+	docker compose -f patterns/p02/docker-compose.yml down -v
 
 ## Run Pattern 3 with Docker Compose (1 manager + 1 API + 3 workers)
 run-p3:
 	docker compose -f patterns/p03/docker-compose.yml up --build
 
 stop-p3:
-	docker compose -f patterns/p03/docker-compose.yml down
+	docker compose -f patterns/p03/docker-compose.yml down -v
 
 ## Run Pattern 4 with Docker Compose (1 manager + 1 API + 3 workers)
 run-p4:
 	docker compose -f patterns/p04/docker-compose.yml up --build
 
 stop-p4:
-	docker compose -f patterns/p04/docker-compose.yml down
+	docker compose -f patterns/p04/docker-compose.yml down -v
 
 ## Run Pattern 5 with Docker Compose (1 manager + 3 APIs + 3 workers + NATS + postgres + nginx)
 run-p5:
 	docker compose -f patterns/p05/docker-compose.yml up --build
 
 stop-p5:
-	docker compose -f patterns/p05/docker-compose.yml down
+	docker compose -f patterns/p05/docker-compose.yml down -v
 
 ## Run Pattern 6 with Docker Compose (1 manager + 3 APIs + 3 workers + broker + nginx)
 ## Use BROKER=nats (default) or BROKER=kafka
@@ -49,7 +49,7 @@ run-p6:
 
 stop-p6:
 	@echo "Stopping Pattern 6 with broker: $(BROKER)"
-	docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml down
+	docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml down -v
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
@@ -94,7 +94,7 @@ test-all: build-all
 	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p02/docker-compose.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p02/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 	@echo "==> [3/6] Pattern 3: Push-WebSocket"
@@ -103,7 +103,7 @@ test-all: build-all
 	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p03/docker-compose.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p03/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 	@echo "==> [4/6] Pattern 4: Streaming-gRPC"
@@ -112,7 +112,7 @@ test-all: build-all
 	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p04/docker-compose.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p04/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 	@echo "==> [5/6] Pattern 5: Brokered-NATS"
@@ -121,7 +121,7 @@ test-all: build-all
 	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p05/docker-compose.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p05/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 	@echo "==> [6/7] Pattern 6: Cloud-Agnostic (NATS)"
@@ -130,7 +130,7 @@ test-all: build-all
 	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 	@echo "==> [7/7] Pattern 6: Cloud-Agnostic (Kafka)"
@@ -139,7 +139,7 @@ test-all: build-all
 	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml down > /dev/null 2>&1; \
+	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 
