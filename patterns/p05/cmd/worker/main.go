@@ -12,11 +12,13 @@ import (
 
 	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/health"
 )
 
 type config struct {
 	NATSURL          string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 
 func main() {
@@ -24,6 +26,9 @@ func main() {
 	if err := envconfig.Process("", &cfg); err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	nc, err := nats.Connect(cfg.NATSURL,
 		nats.MaxReconnects(-1),
@@ -43,15 +48,14 @@ func main() {
 		log.Printf("setup warning: %v", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	consumer := natsinternal.NewNATSConsumer(nc, js)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	log.Printf("Pattern 5 worker listening on NATS %s", cfg.NATSURL)
 
 	_ = consumer.Connect(ctx)
+
+	health.StartServer(ctx, cfg.HealthAddr)
 
 	for {
 		task, err := consumer.Receive(ctx)

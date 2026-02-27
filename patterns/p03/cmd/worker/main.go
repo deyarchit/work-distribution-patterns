@@ -11,11 +11,13 @@ import (
 
 	wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/health"
 )
 
 type config struct {
 	ManagerURL       string `envconfig:"manager_url" default:"ws://localhost:8081/ws/register"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 
 func main() {
@@ -31,6 +33,8 @@ func main() {
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	_ = consumer.Connect(ctx)
+
+	health.StartServer(ctx, cfg.HealthAddr)
 
 	for {
 		task, err := consumer.Receive(ctx)

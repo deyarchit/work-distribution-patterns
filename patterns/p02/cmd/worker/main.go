@@ -11,11 +11,13 @@ import (
 
 	restinternal "work-distribution-patterns/patterns/p02/internal/rest"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/health"
 )
 
 type config struct {
 	ManagerURL       string `envconfig:"manager_url" default:"http://localhost:8081"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 
 func main() {
@@ -33,6 +35,8 @@ func main() {
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	log.Printf("Pattern 2 (REST Polling) Worker connecting to %s", cfg.ManagerURL)
+
+	health.StartServer(ctx, cfg.HealthAddr)
 
 	for {
 		task, err := consumer.Receive(ctx)

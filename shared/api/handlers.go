@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/health"
 	"work-distribution-patterns/shared/models"
 	"work-distribution-patterns/shared/sse"
 )
@@ -119,6 +120,6 @@ func Index(tpl *template.Template) echo.HandlerFunc {
 // Registered before the logger middleware so health poll traffic is not logged.
 func Health() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok")
+		return c.String(http.StatusOK, health.HealthResponse)
 	}
 }

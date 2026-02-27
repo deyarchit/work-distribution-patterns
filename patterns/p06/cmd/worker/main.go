@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
@@ -12,11 +11,13 @@ import (
 
 	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/health"
 )
 
 type config struct {
 	BrokerURL        string `envconfig:"broker_url" default:"nats://localhost:4222"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 
 func main() {
@@ -43,18 +44,7 @@ func main() {
 	log.Printf("Pattern 06 Worker starting [broker=%s]", cfg.BrokerURL)
 	_ = consumer.Connect(ctx)
 
-	// Start a simple health check server
-	go func() {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
-		})
-		log.Printf("Worker health check listening on :8082")
-		if err := http.ListenAndServe(":8082", mux); err != nil {
-			log.Printf("health check server error: %v", err)
-		}
-	}()
+	health.StartServer(ctx, cfg.HealthAddr)
 
 	for {
 		task, err := consumer.Receive(ctx)

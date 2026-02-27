@@ -11,11 +11,13 @@ import (
 
 	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
 	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/health"
 )
 
 type config struct {
 	ManagerGRPCAddr  string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 
 func main() {
@@ -41,6 +43,8 @@ func main() {
 	}
 
 	log.Printf("Worker connected to manager at %s", cfg.ManagerGRPCAddr)
+
+	health.StartServer(ctx, cfg.HealthAddr)
 
 	for {
 		task, err := consumer.Receive(ctx)
