@@ -5,12 +5,10 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/kelseyhightower/envconfig"
 
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/patterns/p06/internal/app"
 	"work-distribution-patterns/shared/health"
 )
 
@@ -29,29 +27,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Setup Transport (Go Cloud PubSub)
-	tasksSub, eventsTopic, err := pubsubinternal.OpenWorkerResources(ctx, cfg.BrokerURL)
-	if err != nil {
-		log.Fatalf("pubsub setup: %v", err)
-	}
-
-	consumer := pubsubinternal.NewPubSubConsumer(tasksSub, eventsTopic)
-	defer consumer.Shutdown(ctx)
-
-	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
-
-	// 2. Run Worker Loop
 	log.Printf("Pattern 06 Worker starting [broker=%s]", cfg.BrokerURL)
-	_ = consumer.Connect(ctx)
-
 	health.StartServer(ctx, cfg.HealthAddr)
 
-	for {
-		task, err := consumer.Receive(ctx)
-		if err != nil {
-			log.Printf("worker stopped: %v", err)
-			return
-		}
-		exec.Run(ctx, task, consumer)
-	}
+	app.RunWorker(ctx, app.WorkerConfig{
+		BrokerURL:        cfg.BrokerURL,
+		MaxStageDuration: cfg.MaxStageDuration,
+	})
 }

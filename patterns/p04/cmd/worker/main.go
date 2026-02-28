@@ -5,12 +5,10 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/kelseyhightower/envconfig"
 
-	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/patterns/p04/internal/app"
 	"work-distribution-patterns/shared/health"
 )
 
@@ -29,31 +27,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	consumer := grpcinternal.NewConsumer(cfg.ManagerGRPCAddr)
-	defer func() {
-		if err := consumer.Close(); err != nil {
-			log.Printf("error closing consumer: %v", err)
-		}
-	}()
-
-	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
-
-	if err := consumer.Connect(ctx); err != nil {
-		log.Fatalf("failed to connect to manager: %v", err)
-	}
-
-	log.Printf("Worker connected to manager at %s", cfg.ManagerGRPCAddr)
-
+	log.Printf("Pattern 4 (gRPC Streaming) Worker connecting to %s", cfg.ManagerGRPCAddr)
 	health.StartServer(ctx, cfg.HealthAddr)
 
-	for {
-		task, err := consumer.Receive(ctx)
-		if err != nil {
-			log.Printf("worker stopped: %v", err)
-			return
-		}
-
-		log.Printf("Received task %s, executing...", task.ID)
-		go exec.Run(ctx, task, consumer)
-	}
+	app.RunWorker(ctx, app.WorkerConfig{
+		ManagerGRPCAddr:  cfg.ManagerGRPCAddr,
+		MaxStageDuration: cfg.MaxStageDuration,
+	})
 }

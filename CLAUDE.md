@@ -32,32 +32,6 @@ make lint
 # 3. Build all binaries to catch compilation errors across patterns
 make build-all
 
-# 4. Full E2E suite — all patterns must pass before work is done
-make test-all
+# 4. Full unit test suite — all patterns must pass before work is done
+make test
 ```
-
-For small, isolated changes (e.g. a comment or doc edit) you may skip steps 3–4, but always run `make fmt` and `make lint` first. Never consider a change complete while lint warnings or test failures remain.
-
-## Testing a Specific Pattern
-
-When working on a single pattern and you want faster iteration without running the full `test-all` suite, use this workflow:
-
-```bash
-# Start the pattern (in foreground, shows logs with --tail=30)
-make run-p<num>
-
-# In a separate terminal, run E2E tests against it
-make test-e2e
-
-# Stop the pattern
-make stop-p<num>
-```
-
-For example, to test pattern 5:
-```bash
-make run-p5       # Terminal 1: start services
-make test-e2e     # Terminal 2: run tests
-make stop-p5      # Terminal 1: cleanup
-```
-
-This is useful during active development on a specific pattern. Before merging, always run the full `make test-all` suite to ensure all patterns still work correctly.

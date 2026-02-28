@@ -6,6 +6,10 @@ bin/
 *.exe
 *.test
 
+# Test artifacts
+cover.out
+cover.html
+
 # Go workspace
 go.work
 go.work.sum

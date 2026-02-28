@@ -11,6 +11,7 @@ A project exploring various work-distribution patterns with progressively increa
 | **p03: Push-WebSocket** | 1 API + N workers | Persistent WebSockets | Tiered Remote Push |
 | **p04: Streaming-gRPC** | 1 API + N workers | gRPC Bidirectional Streams | Tiered Remote Streaming |
 | **p05: Brokered-NATS** | N APIs + N workers | NATS + PostgreSQL | Distributed Event-Driven |
+| **p06: Cloud-PubSub** | N APIs + N workers | gocloud.dev (NATS/Kafka/AWS) | Multi-Cloud Event-Driven |
 
 All patterns expose an **identical HTTP API** and **identical HTMX frontend**. Only the internal dispatch mechanism and layering changes.
 
@@ -20,7 +21,7 @@ All patterns expose an **identical HTTP API** and **identical HTMX frontend**. O
 
 All patterns require:
 - **Go 1.25+**
-- **Docker** and **Docker Compose** (for patterns 2-5)
+- **Docker** and **Docker Compose** (for patterns 2-6)
 
 > **Note:** Pattern 4 uses gRPC, but the generated protobuf code is **already checked into the repository** (`patterns/p04/proto/*.pb.go`). You do **not** need to install protoc or any code generators unless you plan to modify the `.proto` file itself.
 
@@ -97,6 +98,23 @@ make run-p5
 # open http://localhost:8080
 ```
 
+### Pattern 6: Cloud-PubSub (Docker)
+
+Uses `gocloud.dev/pubsub` abstraction. Supports three brokers:
+
+```bash
+# NATS JetStream (default)
+make run-p6 BROKER=nats
+
+# Kafka
+make run-p6 BROKER=kafka
+
+# AWS SNS/SQS (via LocalStack)
+make run-p6 BROKER=aws
+
+# open http://localhost:8080
+```
+
 ## Architecture
 
 ```
@@ -112,9 +130,9 @@ Browser
                    │ contracts.TaskDispatcher interface
         ┌──────────┴─────────────────────────────────┐
         │                                            │
-      p01                                 p02 / p03 / p04 / p05
-  ChannelDispatcher              REST/WS/gRPC/NATSDispatcher
-  (in-process)                    (routes to external workers)
+      p01                                p02 / p03 / p04 / p05 / p06
+  ChannelDispatcher                  REST/WS/gRPC/NATS/CloudDispatcher
+  (in-process)                        (routes to external workers)
 ```
 
 ## Testing
@@ -153,5 +171,6 @@ patterns/
 ├── p02/          Pull-REST: REST-based worker polling
 ├── p03/          Push-WebSocket: WebSocket dispatch to external workers
 ├── p04/          Streaming-gRPC: gRPC bidirectional streams with protobuf
-└── p05/          Brokered-NATS: NATS JetStream (queue) + PostgreSQL (store)
+├── p05/          Brokered-NATS: NATS JetStream (queue) + PostgreSQL (store)
+└── p06/          Cloud-PubSub: gocloud.dev abstraction (NATS/Kafka/AWS)
 ```

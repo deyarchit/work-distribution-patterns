@@ -45,11 +45,16 @@ stop-p5:
 BROKER ?= nats
 run-p6:
 	@echo "Starting Pattern 6 with broker: $(BROKER)"
-	docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml up --build
+	docker compose -p p06-$(BROKER) -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml up --build
 
 stop-p6:
 	@echo "Stopping Pattern 6 with broker: $(BROKER)"
-	docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml down -v
+	docker compose -p p06-$(BROKER) -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml down -v
+
+## Run in-process integration tests for all patterns (generates cover.out + cover.html)
+test:
+	go test ./patterns/... -timeout 300s -coverprofile=cover.out -coverpkg=./patterns/...,./shared/...
+	go tool cover -html=cover.out -o cover.html
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:
@@ -78,8 +83,8 @@ build-all:
 	go build -o bin/p06-manager  ./patterns/p06/cmd/manager
 	go build -o bin/p06-worker   ./patterns/p06/cmd/worker
 
-## Build all binaries and validate all six patterns end-to-end
-test-all: build-all
+## Build all binaries and validate all six patterns end-to-end via Docker Compose
+test-integration: build-all
 	@echo "==> [1/6] Pattern 1: Local-Channels"
 	@{ \
 	  ./bin/p1-server & \
@@ -127,19 +132,19 @@ test-all: build-all
 	@echo "==> [6/7] Pattern 6: Cloud-Agnostic (NATS)"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  docker compose -p p06-nats -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down -v > /dev/null 2>&1; \
+	  docker compose -p p06-nats -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 	@echo "==> [7/7] Pattern 6: Cloud-Agnostic (Kafka)"
 	@echo "    Building containers..."
 	@{ \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  docker compose -p p06-kafka -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
-	  docker compose -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml down -v > /dev/null 2>&1; \
+	  docker compose -p p06-kafka -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 
@@ -163,5 +168,9 @@ update-codemaps:
 	claude -p "run the $(SKILL_NAME) skill" --model "haiku" --allowedTools "Bash,Read,Edit,Write" --output-format stream-json --verbose --include-partial-messages | \
   jq -rj 'select(.type == "stream_event" and .event.delta.type? == "text_delta") | .event.delta.text'
 	@echo "Updated codemaps"
+
+
+## Prepare for pull request
+pr: tidy lint fmt test
 
 .PHONY: *

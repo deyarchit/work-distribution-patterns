@@ -6,11 +6,14 @@ patterns/
       server/
         main.go
     internal/
+      app/
+        app.go
       goroutine/
         consumer.go
         dispatcher.go
       worker/
         worker.go
+    integration_test.go
   p02/
     cmd/
       api/
@@ -20,9 +23,14 @@ patterns/
       worker/
         main.go
     internal/
+      app/
+        api.go
+        manager.go
+        worker.go
       rest/
         consumer.go
         dispatcher.go
+    integration_test.go
   p03/
     cmd/
       api/
@@ -32,9 +40,14 @@ patterns/
       worker/
         main.go
     internal/
+      app/
+        api.go
+        manager.go
+        worker.go
       websocket/
         consumer.go
         dispatcher.go
+    integration_test.go
   p04/
     cmd/
       api/
@@ -44,6 +57,10 @@ patterns/
       worker/
         main.go
     internal/
+      app/
+        api.go
+        manager.go
+        worker.go
       grpc/
         client.go
         consumer.go
@@ -52,6 +69,7 @@ patterns/
     proto/
       work_grpc.pb.go
       work.pb.go
+    integration_test.go
   p05/
     cmd/
       api/
@@ -61,6 +79,10 @@ patterns/
       worker/
         main.go
     internal/
+      app/
+        api.go
+        manager.go
+        worker.go
       nats/
         consumer.go
         dispatcher.go
@@ -68,6 +90,7 @@ patterns/
       postgres/
         store.go
     nginx/
+    integration_test.go
   p06/
     cmd/
       api/
@@ -77,14 +100,20 @@ patterns/
       worker/
         main.go
     internal/
+      app/
+        api.go
+        manager.go
+        worker.go
       postgres/
         store.go
       pubsub/
+        aws.go
         bridge.go
         consumer.go
         dispatcher.go
         setup.go
     nginx/
+    integration_test.go
 shared/
   api/
     handlers.go
@@ -101,6 +130,8 @@ shared/
     nats.go
   executor/
     executor.go
+  health/
+    health.go
   manager/
     manager.go
   models/
@@ -113,9 +144,11 @@ shared/
     store.go
   templates/
     embed.go
+  testutil/
+    helpers.go
+    suite.go
 tests/
   e2e/
-    helpers_test.go
     task_test.go
   load/
     load.go
@@ -123,6 +156,53 @@ tests/
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="patterns/p01/internal/app/app.go">
+package app
+import (
+	"context"
+	"html/template"
+	"time"
+	"work-distribution-patterns/patterns/p01/internal/goroutine"
+	"work-distribution-patterns/patterns/p01/internal/worker"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+	"github.com/labstack/echo/v4"
+)
+⋮----
+"context"
+"html/template"
+"time"
+"work-distribution-patterns/patterns/p01/internal/goroutine"
+"work-distribution-patterns/patterns/p01/internal/worker"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/executor"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+"github.com/labstack/echo/v4"
+⋮----
+// Config holds all runtime parameters for Pattern 1.
+type Config struct {
+	Workers          int
+	QueueSize        int
+	MaxStageDuration int // milliseconds
+}
+⋮----
+MaxStageDuration int // milliseconds
+⋮----
+// New wires all Pattern 1 components and returns a configured Echo router.
+// The caller is responsible for starting the server (e.g. e.Start(addr) or e.Server.Serve(ln)).
+// Component goroutines (event pump, worker pool) are tied to ctx.
+func New(ctx context.Context, cfg Config) (*echo.Echo, error)
+</file>
 
 <file path="patterns/p01/internal/goroutine/consumer.go">
 package goroutine
@@ -216,69 +296,125 @@ import (
 func RunWorker(ctx context.Context, consumer contracts.TaskConsumer, exec *executor.Executor)
 </file>
 
-<file path="patterns/p02/cmd/api/main.go">
-package main
+<file path="patterns/p01/integration_test.go">
+package p01_test
+import (
+	"context"
+	"net"
+	"testing"
+	"work-distribution-patterns/patterns/p01/internal/app"
+	"work-distribution-patterns/shared/testutil"
+)
+⋮----
+"context"
+"net"
+"testing"
+"work-distribution-patterns/patterns/p01/internal/app"
+"work-distribution-patterns/shared/testutil"
+⋮----
+func TestP1Integration(t *testing.T)
+</file>
+
+<file path="patterns/p02/internal/app/api.go">
+package app
 import (
 	"context"
 	"html/template"
-	"log"
-	"github.com/kelseyhightower/envconfig"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/client"
 	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/templates"
+	"github.com/labstack/echo/v4"
 )
 ⋮----
 "context"
 "html/template"
-"log"
-"github.com/kelseyhightower/envconfig"
 "work-distribution-patterns/shared/api"
 "work-distribution-patterns/shared/client"
 "work-distribution-patterns/shared/sse"
 "work-distribution-patterns/shared/templates"
+"github.com/labstack/echo/v4"
 ⋮----
-type config struct {
-	Addr       string `envconfig:"addr" default:":8080"`
-	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+// APIConfig holds runtime parameters for the Pattern 2 API process.
+type APIConfig struct {
+	ManagerURL string
 }
-func main()
-⋮----
-var cfg config
-⋮----
-// Pump manager's SSE stream into the local hub so browser clients connected
-// to this API process receive real-time progress updates.
+// NewAPI wires the Pattern 2 API and returns a configured Echo router.
+// The caller is responsible for starting the server.
+func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error)
 </file>
 
-<file path="patterns/p02/cmd/worker/main.go">
-package main
+<file path="patterns/p02/internal/app/manager.go">
+package app
 import (
 	"context"
-	"log"
-	"os/signal"
-	"syscall"
+	"html/template"
+	"net/http"
+	restinternal "work-distribution-patterns/patterns/p02/internal/rest"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+)
+⋮----
+"context"
+"html/template"
+"net/http"
+restinternal "work-distribution-patterns/patterns/p02/internal/rest"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+⋮----
+// ManagerConfig holds runtime parameters for the Pattern 2 manager process.
+type ManagerConfig struct {
+	WorkersQueueSize int
+}
+// NewManager wires the Pattern 2 manager and returns a configured Echo router.
+// The router exposes task CRUD, SSE stream, and REST worker polling endpoints.
+// The caller is responsible for starting the server.
+func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error)
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p02/internal/app/worker.go">
+package app
+import (
+	"context"
 	"time"
-	"github.com/kelseyhightower/envconfig"
 	restinternal "work-distribution-patterns/patterns/p02/internal/rest"
 	"work-distribution-patterns/shared/executor"
 )
 ⋮----
 "context"
-"log"
-"os/signal"
-"syscall"
 "time"
-"github.com/kelseyhightower/envconfig"
 restinternal "work-distribution-patterns/patterns/p02/internal/rest"
 "work-distribution-patterns/shared/executor"
 ⋮----
-type config struct {
-	ManagerURL       string `envconfig:"manager_url" default:"http://localhost:8081"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+// WorkerConfig holds runtime parameters for the Pattern 2 worker process.
+type WorkerConfig struct {
+	ManagerURL       string
+	MaxStageDuration int // milliseconds
 }
-func main()
 ⋮----
-var cfg config
+MaxStageDuration int // milliseconds
+⋮----
+// RunWorker connects to the manager and runs the REST polling worker loop.
+// Blocks until ctx is cancelled.
+func RunWorker(ctx context.Context, cfg WorkerConfig)
 </file>
 
 <file path="patterns/p02/internal/rest/consumer.go">
@@ -366,69 +502,148 @@ var ev models.TaskEvent
 default: // drop non-terminal events if buffer is full
 </file>
 
-<file path="patterns/p03/cmd/api/main.go">
-package main
+<file path="patterns/p02/integration_test.go">
+package p02_test
+import (
+	"context"
+	"net"
+	"testing"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/patterns/p02/internal/app"
+	"work-distribution-patterns/shared/testutil"
+)
+⋮----
+"context"
+"net"
+"testing"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/patterns/p02/internal/app"
+"work-distribution-patterns/shared/testutil"
+⋮----
+func TestP2Integration(t *testing.T)
+⋮----
+// 1. Start manager.
+⋮----
+// 2. Start worker(s) pointing at the manager.
+⋮----
+// 3. Start API pointing at the manager.
+⋮----
+// startServer starts e on a random port and registers cleanup. Returns the base URL.
+func startServer(t *testing.T, e *echo.Echo) string
+</file>
+
+<file path="patterns/p03/internal/app/api.go">
+package app
 import (
 	"context"
 	"html/template"
-	"log"
-	"github.com/kelseyhightower/envconfig"
 	"work-distribution-patterns/shared/api"
 	"work-distribution-patterns/shared/client"
 	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+	"github.com/labstack/echo/v4"
+)
+⋮----
+"context"
+"html/template"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+"github.com/labstack/echo/v4"
+⋮----
+// APIConfig holds runtime parameters for the Pattern 3 API process.
+type APIConfig struct {
+	ManagerURL string
+}
+// NewAPI wires the Pattern 3 API and returns a configured Echo router.
+// The caller is responsible for starting the server.
+func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error)
+</file>
+
+<file path="patterns/p03/internal/app/manager.go">
+package app
+import (
+	"context"
+	"html/template"
+	"net/http"
+	"github.com/gorilla/websocket"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
 	"work-distribution-patterns/shared/templates"
 )
 ⋮----
 "context"
 "html/template"
-"log"
-"github.com/kelseyhightower/envconfig"
+"net/http"
+"github.com/gorilla/websocket"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
 "work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
 "work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
 "work-distribution-patterns/shared/templates"
 ⋮----
-type config struct {
-	Addr       string `envconfig:"addr" default:":8080"`
-	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+// ManagerConfig holds runtime parameters for the Pattern 3 manager process.
+type ManagerConfig struct {
+	WorkersQueueSize int
 }
-func main()
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+// NewManager wires the Pattern 3 manager and returns a configured Echo router.
+// The router exposes task CRUD, SSE stream, and WebSocket worker registration endpoint.
+// The caller is responsible for starting the server.
+func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error)
 ⋮----
-var cfg config
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
 ⋮----
-// Pump manager's SSE stream into the local hub so browser clients connected
-// to this API process receive real-time progress updates.
+var task models.Task
 </file>
 
-<file path="patterns/p03/cmd/worker/main.go">
-package main
+<file path="patterns/p03/internal/app/worker.go">
+package app
 import (
 	"context"
-	"log"
-	"os/signal"
-	"syscall"
 	"time"
-	"github.com/kelseyhightower/envconfig"
 	wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
 	"work-distribution-patterns/shared/executor"
 )
 ⋮----
 "context"
-"log"
-"os/signal"
-"syscall"
 "time"
-"github.com/kelseyhightower/envconfig"
 wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
 "work-distribution-patterns/shared/executor"
 ⋮----
-type config struct {
-	ManagerURL       string `envconfig:"manager_url" default:"ws://localhost:8081/ws/register"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+// WorkerConfig holds runtime parameters for the Pattern 3 worker process.
+type WorkerConfig struct {
+	// ManagerWSURL is the full WebSocket URL for worker registration,
+	// e.g. "ws://localhost:8081/ws/register".
+	ManagerWSURL     string
+	MaxStageDuration int // milliseconds
 }
-func main()
 ⋮----
-var cfg config
+// ManagerWSURL is the full WebSocket URL for worker registration,
+// e.g. "ws://localhost:8081/ws/register".
+⋮----
+MaxStageDuration int // milliseconds
+⋮----
+// RunWorker connects to the manager via WebSocket and runs the worker loop.
+// Blocks until ctx is cancelled.
+func RunWorker(ctx context.Context, cfg WorkerConfig)
 </file>
 
 <file path="patterns/p03/internal/websocket/consumer.go">
@@ -568,6 +783,164 @@ var ev models.TaskEvent
 wc.hub.events <- ev // blocking: must not lose terminal status
 ⋮----
 // Unknown types (e.g., "ready") are silently ignored.
+</file>
+
+<file path="patterns/p03/integration_test.go">
+package p03_test
+import (
+	"context"
+	"net"
+	"strings"
+	"testing"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/patterns/p03/internal/app"
+	"work-distribution-patterns/shared/testutil"
+)
+⋮----
+"context"
+"net"
+"strings"
+"testing"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/patterns/p03/internal/app"
+"work-distribution-patterns/shared/testutil"
+⋮----
+func TestP3Integration(t *testing.T)
+⋮----
+// 1. Start manager.
+⋮----
+// 2. Derive the WebSocket registration URL from the manager HTTP URL.
+⋮----
+// 3. Start 3 workers (matching docker-compose scale=3). P3 uses one task per worker at a time,
+// so concurrent-task tests require at least 3 idle workers.
+⋮----
+// 4. Start API pointing at the manager.
+⋮----
+// Wait for at least one worker to register via WebSocket.
+⋮----
+// startServer starts e on a random port and registers cleanup. Returns the base URL.
+func startServer(t *testing.T, e *echo.Echo) string
+</file>
+
+<file path="patterns/p04/internal/app/api.go">
+package app
+import (
+	"context"
+	"html/template"
+	"github.com/labstack/echo/v4"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"github.com/labstack/echo/v4"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+// APIConfig holds runtime parameters for the Pattern 4 API process.
+type APIConfig struct {
+	ManagerGRPCAddr string
+}
+// NewAPI wires the Pattern 4 API and returns a configured Echo router.
+// The API connects to the manager via gRPC for task management and event streaming.
+// The caller is responsible for starting the server.
+func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error)
+</file>
+
+<file path="patterns/p04/internal/app/manager.go">
+package app
+import (
+	"context"
+	"html/template"
+	"net/http"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"google.golang.org/grpc"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+	pb "work-distribution-patterns/patterns/p04/proto"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/store"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"net/http"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"google.golang.org/grpc"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+pb "work-distribution-patterns/patterns/p04/proto"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/store"
+"work-distribution-patterns/shared/templates"
+⋮----
+// ManagerComponents holds the HTTP router and the configured gRPC server.
+// The caller is responsible for providing listeners and starting both servers.
+type ManagerComponents struct {
+	// Router is the HTTP Echo server for task CRUD and SSE.
+	Router *echo.Echo
+	// GRPCServer is the gRPC server, already registered with all services.
+	// Start it with: go GRPCServer.Serve(ln)
+	GRPCServer *grpc.Server
+}
+⋮----
+// Router is the HTTP Echo server for task CRUD and SSE.
+⋮----
+// GRPCServer is the gRPC server, already registered with all services.
+// Start it with: go GRPCServer.Serve(ln)
+⋮----
+// ManagerConfig holds runtime parameters for the Pattern 4 manager process.
+type ManagerConfig struct{}
+// NewManager wires all Pattern 4 manager components.
+// Returns ManagerComponents whose Router and GRPCServer the caller must start separately.
+func NewManager(ctx context.Context, _ ManagerConfig) (*ManagerComponents, error)
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p04/internal/app/worker.go">
+package app
+import (
+	"context"
+	"log"
+	"time"
+	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"time"
+grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
+"work-distribution-patterns/shared/executor"
+⋮----
+// WorkerConfig holds runtime parameters for the Pattern 4 worker process.
+type WorkerConfig struct {
+	ManagerGRPCAddr  string
+	MaxStageDuration int // milliseconds
+}
+⋮----
+MaxStageDuration int // milliseconds
+⋮----
+// RunWorker connects to the manager via gRPC and runs the worker loop.
+// Blocks until ctx is cancelled.
+func RunWorker(ctx context.Context, cfg WorkerConfig)
 </file>
 
 <file path="patterns/p04/internal/grpc/client.go">
@@ -1204,15 +1577,135 @@ func file_patterns_p04_proto_work_proto_init()
 type x struct{}
 </file>
 
-<file path="patterns/p05/cmd/worker/main.go">
-package main
+<file path="patterns/p04/integration_test.go">
+package p04_test
+import (
+	"context"
+	"net"
+	"testing"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/patterns/p04/internal/app"
+	"work-distribution-patterns/shared/testutil"
+)
+⋮----
+"context"
+"net"
+"testing"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/patterns/p04/internal/app"
+"work-distribution-patterns/shared/testutil"
+⋮----
+func TestP4Integration(t *testing.T)
+⋮----
+// 1. Wire manager components (HTTP router + gRPC server).
+⋮----
+// 2. Start gRPC server on a random port.
+⋮----
+// 3. Start manager HTTP server on a random port.
+⋮----
+// 4. Start worker connecting via gRPC.
+⋮----
+// 5. Start API connecting via gRPC.
+⋮----
+// Wait for at least one worker to register via gRPC.
+⋮----
+// startServer starts e on a random port and registers cleanup. Returns the base URL.
+func startServer(t *testing.T, e *echo.Echo) string
+</file>
+
+<file path="patterns/p05/internal/app/api.go">
+package app
+import (
+	"context"
+	"html/template"
+	"github.com/labstack/echo/v4"
+	"github.com/nats-io/nats.go"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"github.com/labstack/echo/v4"
+"github.com/nats-io/nats.go"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+// APIConfig holds runtime parameters for the Pattern 5 API process.
+type APIConfig struct {
+	ManagerURL string
+	NATSURL    string
+}
+// NewAPI wires the Pattern 5 API and returns a configured Echo router.
+// The caller is responsible for starting the server.
+func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error)
+</file>
+
+<file path="patterns/p05/internal/app/manager.go">
+package app
+import (
+	"context"
+	"html/template"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go"
+	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/events"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+"github.com/nats-io/nats.go"
+natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
+pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/events"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+// ManagerConfig holds runtime parameters for the Pattern 5 manager process.
+type ManagerConfig struct {
+	NATSURL     string
+	DatabaseURL string
+}
+// NewManager wires the Pattern 5 manager and returns a configured Echo router.
+// Connects to NATS and Postgres; sets up JetStream streams.
+// The caller is responsible for starting the server.
+func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error)
+⋮----
+// Non-fatal: streams may already exist.
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p05/internal/app/worker.go">
+package app
 import (
 	"context"
 	"log"
-	"os/signal"
-	"syscall"
 	"time"
-	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
 	"work-distribution-patterns/shared/executor"
@@ -1220,25 +1713,26 @@ import (
 ⋮----
 "context"
 "log"
-"os/signal"
-"syscall"
 "time"
-"github.com/kelseyhightower/envconfig"
 "github.com/nats-io/nats.go"
 natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
 "work-distribution-patterns/shared/executor"
 ⋮----
-type config struct {
-	NATSURL          string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+// WorkerConfig holds runtime parameters for the Pattern 5 worker process.
+type WorkerConfig struct {
+	NATSURL          string
+	MaxStageDuration int // milliseconds
 }
-func main()
 ⋮----
-var cfg config
+MaxStageDuration int // milliseconds
 ⋮----
-// Synchronous: exec.Run completes before we receive the next task,
-// preserving NATS at-least-once delivery (ACK happens in Connect after
-// the task is delivered to Receive).
+// RunWorker connects to NATS and runs the worker loop.
+// Blocks until ctx is cancelled.
+func RunWorker(ctx context.Context, cfg WorkerConfig)
+⋮----
+// Non-fatal: streams may already exist.
+⋮----
+// Synchronous: preserves NATS at-least-once delivery semantics.
 </file>
 
 <file path="patterns/p05/internal/nats/setup.go">
@@ -1317,6 +1811,159 @@ var status string
 var stagesJSON string
 </file>
 
+<file path="patterns/p05/integration_test.go">
+package p05_test
+import (
+	"context"
+	"net"
+	"testing"
+	"github.com/labstack/echo/v4"
+	tcnats "github.com/testcontainers/testcontainers-go/modules/nats"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"work-distribution-patterns/patterns/p05/internal/app"
+	"work-distribution-patterns/shared/testutil"
+)
+⋮----
+"context"
+"net"
+"testing"
+"github.com/labstack/echo/v4"
+tcnats "github.com/testcontainers/testcontainers-go/modules/nats"
+tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+"work-distribution-patterns/patterns/p05/internal/app"
+"work-distribution-patterns/shared/testutil"
+⋮----
+func TestP5Integration(t *testing.T)
+⋮----
+// 1. Start NATS container (JetStream is enabled by default in the testcontainers NATS module).
+⋮----
+// 2. Start Postgres container.
+⋮----
+// 3. Start manager.
+⋮----
+// 4. Start worker (synchronous — one task at a time).
+⋮----
+// 5. Start API.
+⋮----
+// startServer starts e on a random port and registers cleanup. Returns the base URL.
+func startServer(t *testing.T, e *echo.Echo) string
+</file>
+
+<file path="patterns/p06/internal/app/api.go">
+package app
+import (
+	"context"
+	"encoding/json"
+	"html/template"
+	"log"
+	"github.com/labstack/echo/v4"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/client"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"encoding/json"
+"html/template"
+"log"
+"github.com/labstack/echo/v4"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/client"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+"work-distribution-patterns/shared/templates"
+⋮----
+// APIConfig holds runtime parameters for the Pattern 6 API process.
+type APIConfig struct {
+	ManagerURL string
+	BrokerURL  string
+}
+// NewAPI wires the Pattern 6 API and returns a configured Echo router.
+// The caller is responsible for starting the server.
+func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error)
+⋮----
+var ev models.TaskEvent
+</file>
+
+<file path="patterns/p06/internal/app/manager.go">
+package app
+import (
+	"context"
+	"html/template"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/api"
+	"work-distribution-patterns/shared/manager"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/templates"
+)
+⋮----
+"context"
+"html/template"
+"net/http"
+"time"
+"github.com/jackc/pgx/v5/pgxpool"
+"github.com/labstack/echo/v4"
+"github.com/labstack/echo/v4/middleware"
+pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/api"
+"work-distribution-patterns/shared/manager"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/templates"
+⋮----
+// ManagerConfig holds runtime parameters for the Pattern 6 manager process.
+type ManagerConfig struct {
+	BrokerURL   string
+	DatabaseURL string
+}
+// NewManager wires the Pattern 6 manager and returns a configured Echo router.
+// The caller is responsible for starting the server.
+func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error)
+⋮----
+e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+⋮----
+var task models.Task
+</file>
+
+<file path="patterns/p06/internal/app/worker.go">
+package app
+import (
+	"context"
+	"log"
+	"time"
+	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+	"work-distribution-patterns/shared/executor"
+)
+⋮----
+"context"
+"log"
+"time"
+pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
+"work-distribution-patterns/shared/executor"
+⋮----
+// WorkerConfig holds runtime parameters for the Pattern 6 worker process.
+type WorkerConfig struct {
+	BrokerURL        string
+	MaxStageDuration int // milliseconds
+}
+⋮----
+MaxStageDuration int // milliseconds
+⋮----
+// RunWorker connects to the broker and runs the worker loop.
+// Blocks until ctx is cancelled.
+func RunWorker(ctx context.Context, cfg WorkerConfig)
+</file>
+
 <file path="patterns/p06/internal/postgres/store.go">
 package pgstore
 import (
@@ -1371,6 +2018,66 @@ func scanTask(s scanner) (models.Task, error)
 var t models.Task
 var status string
 var stagesJSON string
+</file>
+
+<file path="patterns/p06/internal/pubsub/aws.go">
+package pubsubinternal
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"gocloud.dev/pubsub"
+)
+⋮----
+"context"
+"fmt"
+"os"
+"strings"
+"time"
+"github.com/aws/aws-sdk-go-v2/aws"
+"github.com/aws/aws-sdk-go-v2/config"
+"github.com/aws/aws-sdk-go-v2/service/sns"
+"github.com/aws/aws-sdk-go-v2/service/sqs"
+"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+"gocloud.dev/pubsub"
+⋮----
+// openAWSAPISubscription dynamically creates an SQS queue for the API instance,
+// subscribes it to the api-events SNS topic, and returns a gocloud Subscription.
+// This allows API instances to scale dynamically without pre-creating queues.
+func openAWSAPISubscription(ctx context.Context) (*pubsub.Subscription, error)
+⋮----
+endpoint := os.Getenv("AWS_ENDPOINT_URL") // http://localstack:4566
+region := os.Getenv("AWS_REGION")         // us-east-1
+// Generate unique queue name based on hostname
+⋮----
+// Configure AWS SDK
+⋮----
+// Use custom endpoint for LocalStack if provided
+⋮----
+// 1. Create SQS queue (idempotent)
+⋮----
+// 2. Get queue ARN for SNS subscription
+⋮----
+// 3. Set queue policy to allow SNS to publish
+⋮----
+// 4. Subscribe queue to SNS topic (idempotent)
+⋮----
+// 5. Open gocloud subscription
+// The awssnssqs package provides the awssqs:// scheme for subscriptions
+// queueURL is like: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/queue-name
+// We need: awssqs://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/queue-name?region=us-east-1
+// Strip the http:// prefix from queueURL
+⋮----
+sqsURL = sqsURL[7:] // Remove "http://"
+⋮----
+sqsURL = sqsURL[8:] // Remove "https://"
 </file>
 
 <file path="patterns/p06/internal/pubsub/bridge.go">
@@ -1496,6 +2203,69 @@ func (d *PubSubDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, 
 func (d *PubSubDispatcher) Shutdown(ctx context.Context)
 </file>
 
+<file path="patterns/p06/integration_test.go">
+package p06_test
+import (
+	"context"
+	"net"
+	"testing"
+	"github.com/labstack/echo/v4"
+	tcnats "github.com/testcontainers/testcontainers-go/modules/nats"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"work-distribution-patterns/patterns/p06/internal/app"
+	"work-distribution-patterns/shared/testutil"
+)
+⋮----
+"context"
+"net"
+"testing"
+"github.com/labstack/echo/v4"
+tcnats "github.com/testcontainers/testcontainers-go/modules/nats"
+tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+"work-distribution-patterns/patterns/p06/internal/app"
+"work-distribution-patterns/shared/testutil"
+⋮----
+func TestP6Integration(t *testing.T)
+⋮----
+// 1. Start NATS container (JetStream is enabled by default in the testcontainers NATS module).
+⋮----
+// The gocloud NATS driver expects the URL scheme "nats://".
+⋮----
+// 2. Start Postgres container.
+⋮----
+// 3. Start manager.
+⋮----
+// 4. Start worker (synchronous — one task at a time).
+⋮----
+// 5. Start API.
+⋮----
+// startServer starts e on a random port and registers cleanup. Returns the base URL.
+func startServer(t *testing.T, e *echo.Echo) string
+</file>
+
+<file path="shared/health/health.go">
+package health
+import (
+	"context"
+	"log"
+	"net/http"
+	"time"
+)
+⋮----
+"context"
+"log"
+"net/http"
+"time"
+⋮----
+// HealthResponse is the standard string returned by all health check endpoints.
+const HealthResponse = "ok"
+// Handler returns a standard net/http handler for health checks.
+func Handler() http.HandlerFunc
+// StartServer starts a minimal HTTP server in the background to handle health checks.
+// It listens on the provided addr and shuts down gracefully when the context is canceled.
+func StartServer(ctx context.Context, addr string)
+</file>
+
 <file path="shared/sse/client.go">
 package sse
 import (
@@ -1551,66 +2321,200 @@ import "embed"
 var FS embed.FS
 </file>
 
-<file path="patterns/p04/cmd/api/main.go">
-package main
+<file path="shared/testutil/helpers.go">
+package testutil
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+⋮----
+"bufio"
+"context"
+"encoding/json"
+"fmt"
+"net/http"
+"strings"
+"testing"
+"time"
+⋮----
+// SubmitRequest is the POST /tasks body.
+type SubmitRequest struct {
+	Name       string `json:"name"`
+	StageCount int    `json:"stage_count"`
+}
+// SubmitResponse is the 202 response from POST /tasks.
+type SubmitResponse struct {
+	ID string `json:"id"`
+}
+// TaskResponse mirrors models.Task for JSON decoding.
+type TaskResponse struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Status string          `json:"status"`
+	Stages []StageResponse `json:"stages"`
+}
+// StageResponse mirrors models.Stage for JSON decoding.
+type StageResponse struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+}
+// SSEEvent represents a parsed server-sent event.
+type SSEEvent struct {
+	Type      string `json:"type"`
+	TaskID    string `json:"taskID"`
+	StageName string `json:"stageName"`
+	Progress  int    `json:"progress"`
+	Status    string `json:"status"`
+}
+// CollectedEvents contains the result of event collection.
+type CollectedEvents struct {
+	EventCounts   map[string]int            // eventType -> count (for single task)
+	PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
+	StatusSeq     []string                  // sequence of status events
+	SeenCompleted bool                      // whether task_status=completed was seen
+}
+⋮----
+EventCounts   map[string]int            // eventType -> count (for single task)
+PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
+StatusSeq     []string                  // sequence of status events
+SeenCompleted bool                      // whether task_status=completed was seen
+⋮----
+// SSEClient connects to the /events endpoint and emits parsed events on a channel.
+// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
+// If taskID is empty, connects to /events for global delivery (all tasks).
+// Returns when ctx is cancelled or the connection drops.
+func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan SSEEvent
+⋮----
+resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
+⋮----
+var ev SSEEvent
+⋮----
+// PostTask submits a task and returns its ID.
+func PostTask(t *testing.T, baseURL, name string, stageCount int) string
+⋮----
+var sr SubmitResponse
+⋮----
+// ListTasks fetches all tasks from GET /tasks.
+func ListTasks(t *testing.T, baseURL string) []TaskResponse
+⋮----
+var tasks []TaskResponse
+⋮----
+// GetTask fetches a task by ID.
+func GetTask(t *testing.T, baseURL, id string) TaskResponse
+⋮----
+var tr TaskResponse
+⋮----
+// DoGet performs a GET request and returns the HTTP status code.
+// Returns (0, err) on connection failure.
+func DoGet(url string) (int, error)
+⋮----
+resp, err := http.Get(url) //nolint:noctx
+⋮----
+// WaitReady polls baseURL/health until it returns 200 or times out after 10 seconds.
+func WaitReady(t *testing.T, baseURL string)
+// WaitForWorker submits a probe task and retries until a worker accepts it (HTTP 202).
+// This is needed for patterns where workers register asynchronously (P3 WebSocket, P4 gRPC).
+// It also waits for the probe task to complete so the worker is idle before the suite runs.
+// The probe task runs normally; its events are filtered out by RunSuite's per-task tracking.
+func WaitForWorker(t *testing.T, baseURL string)
+⋮----
+resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body))) //nolint:noctx
+⋮----
+// Wait for the probe task to complete so the worker is free before the suite starts.
+⋮----
+// waitForTaskCompletion polls GET /tasks/<id> until status is terminal or timeout elapses.
+func waitForTaskCompletion(baseURL, taskID string, timeout time.Duration)
+⋮----
+resp, err := http.Get(fmt.Sprintf("%s/tasks/%s", baseURL, taskID)) //nolint:noctx
+⋮----
+// CollectEventsUntilQuiet collects events from the SSE channel for the specified task IDs
+// until no events are received for the quietDuration. Returns collected event data.
+func CollectEventsUntilQuiet(ctx context.Context, t *testing.T, events <-chan SSEEvent, taskIDs []string, quietDuration time.Duration) CollectedEvents
+</file>
+
+<file path="shared/testutil/suite.go">
+package testutil
 import (
 	"context"
-	"html/template"
-	"log"
-	"github.com/kelseyhightower/envconfig"
-	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/templates"
+	"testing"
+	"time"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 ⋮----
 "context"
-"html/template"
+"testing"
+"time"
+"github.com/stretchr/testify/assert"
+"github.com/stretchr/testify/require"
+⋮----
+// RunSuite runs the standard set of integration tests against baseURL.
+// It is intended to be called from pattern-specific integration test files.
+func RunSuite(t *testing.T, baseURL string)
+// testSingleTask verifies a 3-stage task emits progress events and reaches completed.
+func testSingleTask(t *testing.T, baseURL string)
+⋮----
+const stageCount = 3
+⋮----
+// testConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
+func testConcurrentTasks(t *testing.T, baseURL string)
+⋮----
+const numTasks = 3
+⋮----
+// testStatusTransitions verifies the task emits SSE status events: running → completed.
+func testStatusTransitions(t *testing.T, baseURL string)
+⋮----
+const stageCount = 2
+⋮----
+var found *TaskResponse
+</file>
+
+<file path="patterns/p02/cmd/api/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p02/internal/app"
+)
+⋮----
+"context"
 "log"
 "github.com/kelseyhightower/envconfig"
-grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/templates"
+"work-distribution-patterns/patterns/p02/internal/app"
 ⋮----
 type config struct {
-	Addr            string `envconfig:"addr" default:":8080"`
-	ManagerGRPCAddr string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
 }
 func main()
 ⋮----
 var cfg config
-⋮----
-// Connect to manager via gRPC
-⋮----
-// Subscribe to all events from manager via gRPC and pump into local SSE hub
 </file>
 
-<file path="patterns/p04/cmd/worker/main.go">
+<file path="patterns/p03/cmd/api/main.go">
 package main
 import (
 	"context"
 	"log"
-	"os/signal"
-	"syscall"
-	"time"
 	"github.com/kelseyhightower/envconfig"
-	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-	"work-distribution-patterns/shared/executor"
+	"work-distribution-patterns/patterns/p03/internal/app"
 )
 ⋮----
 "context"
 "log"
-"os/signal"
-"syscall"
-"time"
 "github.com/kelseyhightower/envconfig"
-grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-"work-distribution-patterns/shared/executor"
+"work-distribution-patterns/patterns/p03/internal/app"
 ⋮----
 type config struct {
-	ManagerGRPCAddr  string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
 }
 func main()
 ⋮----
@@ -1846,153 +2750,6 @@ func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error
 func (b *NATSDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 </file>
 
-<file path="patterns/p06/cmd/api/main.go">
-package main
-import (
-	"context"
-	"encoding/json"
-	"html/template"
-	"log"
-	"github.com/kelseyhightower/envconfig"
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/client"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"encoding/json"
-"html/template"
-"log"
-"github.com/kelseyhightower/envconfig"
-pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/client"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr       string `envconfig:"addr" default:":8080"`
-	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
-	BrokerURL  string `envconfig:"broker_url" default:"nats://localhost:4222"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// 1. Subscribe to broker events (Go Cloud PubSub)
-⋮----
-// 2. Use RemoteTaskManager to proxy Submit/Get/List to the Manager
-⋮----
-// 3. Subscribe to broker events via Go Cloud and pump to SSE Hub
-⋮----
-var ev models.TaskEvent
-</file>
-
-<file path="patterns/p06/cmd/manager/main.go">
-package main
-import (
-	"context"
-	"html/template"
-	"log"
-	"net/http"
-	"time"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/templates"
-)
-⋮----
-"context"
-"html/template"
-"log"
-"net/http"
-"time"
-"github.com/jackc/pgx/v5/pgxpool"
-"github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-pgstore "work-distribution-patterns/patterns/p06/internal/postgres"
-pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/templates"
-⋮----
-type config struct {
-	Addr        string `envconfig:"addr" default:":8081"`
-	BrokerURL   string `envconfig:"broker_url" default:"nats://localhost:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// 1. Setup Postgres
-⋮----
-// 2. Setup PubSub (Go Cloud with NATS/RabbitMQ)
-⋮----
-// Start dispatcher to receive worker events
-⋮----
-// Event bridge for publishing to APIs (manager republishes worker events)
-⋮----
-// 4. Setup Manager
-⋮----
-// 5. Serve Manager API
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
-⋮----
-var task models.Task
-</file>
-
-<file path="patterns/p06/cmd/worker/main.go">
-package main
-import (
-	"context"
-	"log"
-	"net/http"
-	"os/signal"
-	"syscall"
-	"time"
-	"github.com/kelseyhightower/envconfig"
-	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-	"work-distribution-patterns/shared/executor"
-)
-⋮----
-"context"
-"log"
-"net/http"
-"os/signal"
-"syscall"
-"time"
-"github.com/kelseyhightower/envconfig"
-pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
-"work-distribution-patterns/shared/executor"
-⋮----
-type config struct {
-	BrokerURL        string `envconfig:"broker_url" default:"nats://localhost:4222"`
-	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
-}
-func main()
-⋮----
-var cfg config
-⋮----
-// 1. Setup Transport (Go Cloud PubSub)
-⋮----
-// 2. Run Worker Loop
-⋮----
-// Start a simple health check server
-</file>
-
 <file path="tests/load/load.go">
 // load is a configurable load test tool for the work-distribution-patterns API.
 // Run: go run ./tests/load/load.go -url http://localhost:8080
@@ -2050,97 +2807,165 @@ var sr submitResponse
 var tr taskResponse
 </file>
 
-<file path="patterns/p05/cmd/api/main.go">
+<file path="patterns/p02/cmd/worker/main.go">
 package main
 import (
 	"context"
-	"html/template"
 	"log"
+	"os/signal"
+	"syscall"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/nats-io/nats.go"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/client"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/templates"
+	"work-distribution-patterns/patterns/p02/internal/app"
+	"work-distribution-patterns/shared/health"
 )
 ⋮----
 "context"
-"html/template"
 "log"
+"os/signal"
+"syscall"
 "github.com/kelseyhightower/envconfig"
-"github.com/nats-io/nats.go"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/client"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/templates"
+"work-distribution-patterns/patterns/p02/internal/app"
+"work-distribution-patterns/shared/health"
 ⋮----
 type config struct {
-	Addr       string `envconfig:"addr" default:":8080"`
-	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
-	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
+	ManagerURL       string `envconfig:"manager_url" default:"http://localhost:8081"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 func main()
 ⋮----
 var cfg config
-⋮----
-// Subscribe directly to NATS for events (distributed pub/sub).
 </file>
 
-<file path="patterns/p06/internal/pubsub/setup.go">
-package pubsubinternal
+<file path="patterns/p03/cmd/worker/main.go">
+package main
 import (
 	"context"
-	"fmt"
-	"os"
-	"strings"
-	"time"
-	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
-	"gocloud.dev/pubsub"
-	_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
+	"log"
+	"os/signal"
+	"syscall"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p03/internal/app"
+	"work-distribution-patterns/shared/health"
 )
 ⋮----
 "context"
-"fmt"
-"os"
-"strings"
-"time"
-_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
-"gocloud.dev/pubsub"
-_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
+"log"
+"os/signal"
+"syscall"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p03/internal/app"
+"work-distribution-patterns/shared/health"
 ⋮----
-// OpenManagerResources initializes Go Cloud resources for the manager.
-// Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
-func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error)
+type config struct {
+	ManagerURL       string `envconfig:"manager_url" default:"ws://localhost:8081/ws/register"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
+}
+func main()
 ⋮----
-var tasksTopicURL, eventsSubURL, apiEventsTopicURL string
+var cfg config
+</file>
+
+<file path="patterns/p04/cmd/api/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p04/internal/app"
+)
 ⋮----
-// NATS JetStream URLs
+"context"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p04/internal/app"
 ⋮----
-// Kafka URLs (connection from KAFKA_BROKERS env var)
-// For topics, the path is the topic name
-// For subscriptions: kafka://consumer-group?topic=topic-name
-// Separate topics to avoid feedback loop: workers→worker_events, manager→api_events
+type config struct {
+	Addr            string `envconfig:"addr" default:":8080"`
+	ManagerGRPCAddr string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
+}
+func main()
 ⋮----
-// OpenWorkerResources initializes Go Cloud resources for workers.
-func OpenWorkerResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, *pubsub.Topic, error)
+var cfg config
+</file>
+
+<file path="patterns/p05/cmd/worker/main.go">
+package main
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p05/internal/app"
+	"work-distribution-patterns/shared/health"
+)
 ⋮----
-var tasksSubURL, eventsTopicURL string
+"context"
+"log"
+"os/signal"
+"syscall"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p05/internal/app"
+"work-distribution-patterns/shared/health"
 ⋮----
-// Workers share tasks via consumer group "workers"
+type config struct {
+	NATSURL          string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
+}
+func main()
 ⋮----
-// OpenAPIResources initializes Go Cloud resources for API servers.
-func OpenAPIResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, error)
+var cfg config
+</file>
+
+<file path="patterns/p06/cmd/api/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p06/internal/app"
+)
 ⋮----
-var eventsSubURL string
+"context"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p06/internal/app"
 ⋮----
-// NATS JetStream URL (ephemeral consumer)
+type config struct {
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	BrokerURL  string `envconfig:"broker_url" default:"nats://localhost:4222"`
+}
+func main()
 ⋮----
-// Each API instance uses its hostname as unique consumer group (auto-scales)
-// Docker/K8s automatically assigns unique hostnames like p06-api-1, p06-api-2, etc.
+var cfg config
+</file>
+
+<file path="patterns/p06/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p06/internal/app"
+)
 ⋮----
-// Fallback: generate unique ID if hostname fails
+"context"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p06/internal/app"
+⋮----
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	BrokerURL   string `envconfig:"broker_url" default:"nats://localhost:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
 </file>
 
 <file path="shared/contracts/consumer.go">
@@ -2238,237 +3063,165 @@ type TaskStore interface {
 }
 </file>
 
-<file path="patterns/p01/cmd/server/main.go">
+<file path="patterns/p04/cmd/worker/main.go">
 package main
 import (
 	"context"
-	"html/template"
 	"log"
-	"time"
+	"os/signal"
+	"syscall"
 	"github.com/kelseyhightower/envconfig"
-	"work-distribution-patterns/patterns/p01/internal/goroutine"
-	"work-distribution-patterns/patterns/p01/internal/worker"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/executor"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
+	"work-distribution-patterns/patterns/p04/internal/app"
+	"work-distribution-patterns/shared/health"
 )
 ⋮----
 "context"
-"html/template"
 "log"
-"time"
+"os/signal"
+"syscall"
 "github.com/kelseyhightower/envconfig"
-"work-distribution-patterns/patterns/p01/internal/goroutine"
-"work-distribution-patterns/patterns/p01/internal/worker"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/executor"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
+"work-distribution-patterns/patterns/p04/internal/app"
+"work-distribution-patterns/shared/health"
 ⋮----
 type config struct {
-	Addr             string `envconfig:"addr" default:":8080"`
-	Workers          int    `envconfig:"workers" default:"5"`
-	QueueSize        int    `envconfig:"queue_size" default:"20"`
+	ManagerGRPCAddr  string `envconfig:"manager_grpc_addr" default:"localhost:9091"`
 	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 func main()
 ⋮----
 var cfg config
-⋮----
-mgr := manager.New(taskStore, dispatcher, bus, 0) // deadline=0 disables re-dispatch
-⋮----
-// Pump events from the bus into the local hub for the browser
 </file>
 
-<file path="patterns/p02/cmd/manager/main.go">
+<file path="patterns/p05/cmd/api/main.go">
 package main
 import (
 	"context"
-	"html/template"
 	"log"
-	"net/http"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	restinternal "work-distribution-patterns/patterns/p02/internal/rest"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
+	"work-distribution-patterns/patterns/p05/internal/app"
 )
 ⋮----
 "context"
-"html/template"
 "log"
-"net/http"
 "github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-restinternal "work-distribution-patterns/patterns/p02/internal/rest"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
+"work-distribution-patterns/patterns/p05/internal/app"
 ⋮----
 type config struct {
-	Addr             string `envconfig:"addr" default:":8081"`
-	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
+	Addr       string `envconfig:"addr" default:":8080"`
+	ManagerURL string `envconfig:"manager_url" default:"http://localhost:8081"`
+	NATSURL    string `envconfig:"nats_url" default:"nats://localhost:4222"`
 }
 func main()
 ⋮----
 var cfg config
-⋮----
-// Pump manager events into SSE hub for API processes to subscribe
-⋮----
-// Build the router manually to avoid the route collision on POST /tasks
-// that api.NewRouter would cause — the manager needs a custom handler that
-// accepts a fully-formed Task (not the {name, stage_count} submit request).
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
-⋮----
-// Accept a fully-formed Task forwarded by the API process.
-// The API already called models.NewTask(...); we must not create a new UUID.
-⋮----
-var task models.Task
-⋮----
-// Worker polling endpoints.
 </file>
 
-<file path="patterns/p03/cmd/manager/main.go">
+<file path="patterns/p06/cmd/worker/main.go">
 package main
 import (
 	"context"
-	"html/template"
 	"log"
-	"net/http"
-	"github.com/gorilla/websocket"
+	"os/signal"
+	"syscall"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
+	"work-distribution-patterns/patterns/p06/internal/app"
+	"work-distribution-patterns/shared/health"
 )
 ⋮----
 "context"
-"html/template"
 "log"
-"net/http"
-"github.com/gorilla/websocket"
+"os/signal"
+"syscall"
 "github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-wsinternal "work-distribution-patterns/patterns/p03/internal/websocket"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
+"work-distribution-patterns/patterns/p06/internal/app"
+"work-distribution-patterns/shared/health"
 ⋮----
 type config struct {
-	Addr             string `envconfig:"addr" default:":8081"`
-	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
-}
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	BrokerURL        string `envconfig:"broker_url" default:"nats://localhost:4222"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
+	HealthAddr       string `envconfig:"health_addr" default:":8082"`
 }
 func main()
 ⋮----
 var cfg config
-⋮----
-// Pump manager events into SSE hub for API processes to subscribe
-⋮----
-// Build the router manually — the manager accepts a fully-formed Task
-// (pre-created by the API with models.NewTask) rather than a submit request.
-⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
-⋮----
-// Accept a fully-formed Task forwarded by the API process.
-⋮----
-var task models.Task
-⋮----
-// Worker WebSocket registration — workers connect here to receive tasks.
 </file>
 
-<file path="patterns/p05/cmd/manager/main.go">
-package main
+<file path="patterns/p06/internal/pubsub/setup.go">
+package pubsubinternal
 import (
 	"context"
-	"html/template"
-	"log"
-	"net/http"
+	"fmt"
+	"os"
+	"strings"
 	"time"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"github.com/nats-io/nats.go"
-	natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
-	pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/templates"
+	_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
+	"gocloud.dev/pubsub"
+	_ "gocloud.dev/pubsub/awssnssqs"   // Register awssns:// and awssnssqs:// schemes
+	_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
 )
 ⋮----
 "context"
-"html/template"
-"log"
-"net/http"
+"fmt"
+"os"
+"strings"
 "time"
-"github.com/jackc/pgx/v5/pgxpool"
-"github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-"github.com/nats-io/nats.go"
-natsinternal "work-distribution-patterns/patterns/p05/internal/nats"
-pgstore "work-distribution-patterns/patterns/p05/internal/postgres"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/templates"
+_ "github.com/pitabwire/natspubsub" // Register nats:// scheme with JetStream support
+"gocloud.dev/pubsub"
+_ "gocloud.dev/pubsub/awssnssqs"   // Register awssns:// and awssnssqs:// schemes
+_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
 ⋮----
-type config struct {
-	Addr        string `envconfig:"addr" default:":8081"`
-	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
-	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
-}
-func main()
+// OpenManagerResources initializes Go Cloud resources for the manager.
+// Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
+func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error)
 ⋮----
-var cfg config
+var tasksTopicURL, eventsSubURL, apiEventsTopicURL string
 ⋮----
-// Build the router manually — the manager accepts a fully-formed Task
-// (pre-created by the API with models.NewTask) rather than a submit request.
+// NATS JetStream URLs
 ⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+// Kafka URLs (connection from KAFKA_BROKERS env var)
+// For topics, the path is the topic name
+// For subscriptions: kafka://consumer-group?topic=topic-name
+// Separate topics to avoid feedback loop: workers→worker_events, manager→api_events
 ⋮----
-// Accept a fully-formed Task forwarded by the API process.
+// AWS: SQS for point-to-point, SNS for fanout
+endpoint := os.Getenv("AWS_ENDPOINT_URL") // http://localstack:4566
+region := os.Getenv("AWS_REGION")         // us-east-1
+// Strip http:// or https:// from endpoint for gocloud URLs
 ⋮----
-var task models.Task
+// Manager publishes tasks to SQS (workers compete for them)
+⋮----
+// Manager consumes events from SQS (workers publish to it)
+⋮----
+// Manager publishes to SNS for fanout to APIs
+// Note the 3 slashes; ARNs have colons and aren't valid as hostnames
+⋮----
+// OpenWorkerResources initializes Go Cloud resources for workers.
+func OpenWorkerResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, *pubsub.Topic, error)
+⋮----
+var tasksSubURL, eventsTopicURL string
+⋮----
+// Workers share tasks via consumer group "workers"
+⋮----
+// AWS: SQS for both tasks and events
+⋮----
+// Workers consume tasks from SQS (competing with other workers)
+⋮----
+// Workers publish events to SQS (manager is sole consumer)
+⋮----
+// OpenAPIResources initializes Go Cloud resources for API servers.
+func OpenAPIResources(ctx context.Context, brokerURL string) (*pubsub.Subscription, error)
+⋮----
+var eventsSubURL string
+⋮----
+// NATS JetStream URL (ephemeral consumer)
+⋮----
+// Each API instance uses its hostname as unique consumer group (auto-scales)
+// Docker/K8s automatically assigns unique hostnames like p06-api-1, p06-api-2, etc.
+⋮----
+// Fallback: generate unique ID if hostname fails
+⋮----
+// AWS: dynamically create queue and subscription
 </file>
 
 <file path="shared/contracts/manager.go">
@@ -2633,71 +3386,99 @@ func (s *MemoryStore) SetStatus(id string, status models.TaskStatus) error
 func (s *MemoryStore) SetDispatchedAt(id string, t time.Time) error
 </file>
 
-<file path="patterns/p04/cmd/manager/main.go">
+<file path="patterns/p01/cmd/server/main.go">
 package main
 import (
 	"context"
-	"html/template"
 	"log"
-	"net"
-	"net/http"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"google.golang.org/grpc"
-	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-	pb "work-distribution-patterns/patterns/p04/proto"
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/manager"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/store"
-	"work-distribution-patterns/shared/templates"
+	"work-distribution-patterns/patterns/p01/internal/app"
 )
 ⋮----
 "context"
-"html/template"
 "log"
-"net"
-"net/http"
 "github.com/kelseyhightower/envconfig"
-"github.com/labstack/echo/v4"
-"github.com/labstack/echo/v4/middleware"
-"google.golang.org/grpc"
-grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
-pb "work-distribution-patterns/patterns/p04/proto"
-"work-distribution-patterns/shared/api"
-"work-distribution-patterns/shared/events"
-"work-distribution-patterns/shared/manager"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
-"work-distribution-patterns/shared/store"
-"work-distribution-patterns/shared/templates"
+"work-distribution-patterns/patterns/p01/internal/app"
 ⋮----
 type config struct {
-	HTTPAddr string `envconfig:"http_addr" default:":8081"`
-	GRPCAddr string `envconfig:"grpc_addr" default:":9091"`
+	Addr             string `envconfig:"addr" default:":8080"`
+	Workers          int    `envconfig:"workers" default:"5"`
+	QueueSize        int    `envconfig:"queue_size" default:"20"`
+	MaxStageDuration int    `envconfig:"max_stage_duration" default:"500"`
 }
 func main()
 ⋮----
 var cfg config
+</file>
+
+<file path="patterns/p02/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p02/internal/app"
+)
 ⋮----
-// Create gRPC server
+"context"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p02/internal/app"
 ⋮----
-// Start manager (handles task lifecycle and event routing)
+type config struct {
+	Addr             string `envconfig:"addr" default:":8081"`
+	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
+}
+func main()
 ⋮----
-// Pump manager events into SSE hub for API processes to subscribe
+var cfg config
+</file>
+
+<file path="patterns/p03/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p03/internal/app"
+)
 ⋮----
-// Start gRPC server in background
+"context"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p03/internal/app"
 ⋮----
-// HTTP API for compatibility with existing patterns (for remote API to call)
+type config struct {
+	Addr             string `envconfig:"addr" default:":8081"`
+	WorkersQueueSize int    `envconfig:"workers_queue_size" default:"20"`
+}
+func main()
 ⋮----
-e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+var cfg config
+</file>
+
+<file path="patterns/p05/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"log"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p05/internal/app"
+)
 ⋮----
-// HTTP endpoint for API to submit tasks (compatibility with shared/client.RemoteTaskManager)
+"context"
+"log"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p05/internal/app"
 ⋮----
-var task models.Task
+type config struct {
+	Addr        string `envconfig:"addr" default:":8081"`
+	NATSURL     string `envconfig:"nats_url" default:"nats://127.0.0.1:4222"`
+	DatabaseURL string `envconfig:"database_url" default:"postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable"`
+}
+func main()
+⋮----
+var cfg config
 </file>
 
 <file path="shared/client/manager.go">
@@ -2747,6 +3528,31 @@ var task models.Task
 func (m *RemoteTaskManager) List(ctx context.Context) []models.Task
 ⋮----
 var tasks []models.Task
+</file>
+
+<file path="patterns/p04/cmd/manager/main.go">
+package main
+import (
+	"context"
+	"log"
+	"net"
+	"github.com/kelseyhightower/envconfig"
+	"work-distribution-patterns/patterns/p04/internal/app"
+)
+⋮----
+"context"
+"log"
+"net"
+"github.com/kelseyhightower/envconfig"
+"work-distribution-patterns/patterns/p04/internal/app"
+⋮----
+type config struct {
+	HTTPAddr string `envconfig:"http_addr" default:":8081"`
+	GRPCAddr string `envconfig:"grpc_addr" default:":9091"`
+}
+func main()
+⋮----
+var cfg config
 </file>
 
 <file path="shared/models/task.go">
@@ -2815,119 +3621,6 @@ type Stage struct {
 }
 </file>
 
-<file path="tests/e2e/helpers_test.go">
-package e2e_test
-import (
-	"bufio"
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os"
-	"strings"
-	"testing"
-	"time"
-)
-⋮----
-"bufio"
-"context"
-"encoding/json"
-"fmt"
-"net/http"
-"os"
-"strings"
-"testing"
-"time"
-⋮----
-// baseURL returns the target API base URL (default: http://localhost:8080).
-func baseURL() string
-// submitRequest is the POST /tasks body.
-type submitRequest struct {
-	Name       string `json:"name"`
-	StageCount int    `json:"stage_count"`
-}
-// submitResponse is the 202 response from POST /tasks.
-type submitResponse struct {
-	ID string `json:"id"`
-}
-// taskResponse mirrors models.Task for JSON decoding.
-type taskResponse struct {
-	ID     string          `json:"id"`
-	Name   string          `json:"name"`
-	Status string          `json:"status"`
-	Stages []stageResponse `json:"stages"`
-}
-type stageResponse struct {
-	Index int    `json:"index"`
-	Name  string `json:"name"`
-}
-// SSEEvent represents a parsed server-sent event.
-type SSEEvent struct {
-	Type      string `json:"type"`
-	TaskID    string `json:"taskID"`
-	StageName string `json:"stageName"`
-	Progress  int    `json:"progress"`
-	Status    string `json:"status"`
-}
-// SSEClient connects to the /events endpoint and emits parsed events on a channel.
-// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
-// If taskID is empty, connects to /events for global delivery (all tasks).
-// Returns when ctx is cancelled or the connection drops.
-func SSEClient(ctx context.Context, t *testing.T, taskID string) <-chan SSEEvent
-⋮----
-resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
-⋮----
-var ev SSEEvent
-⋮----
-// postTask submits a task and returns its ID.
-func postTask(t *testing.T, name string, stageCount int) string
-⋮----
-var sr submitResponse
-⋮----
-// listTasks fetches all tasks from GET /tasks.
-func listTasks(t *testing.T) []taskResponse
-⋮----
-var tasks []taskResponse
-⋮----
-// getTask fetches a task by ID.
-func getTask(t *testing.T, id string) taskResponse
-⋮----
-var tr taskResponse
-⋮----
-// collectedEvents contains the result of event collection.
-type collectedEvents struct {
-	EventCounts   map[string]int            // eventType -> count (for single task)
-	PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
-	StatusSeq     []string                  // sequence of status events
-	SeenCompleted bool                      // whether task_status=completed was seen
-}
-⋮----
-EventCounts   map[string]int            // eventType -> count (for single task)
-PerTask       map[string]map[string]int // taskID -> eventType -> count (for multiple tasks)
-StatusSeq     []string                  // sequence of status events
-SeenCompleted bool                      // whether task_status=completed was seen
-⋮----
-// collectEventsUntilQuiet collects events from the SSE channel for the specified task IDs
-// until no events are received for the quietDuration. Returns collected event data.
-func collectEventsUntilQuiet(ctx context.Context, t *testing.T, events <-chan SSEEvent, taskIDs []string, quietDuration time.Duration) collectedEvents
-⋮----
-seenEvents := make(map[string]bool) // for duplicate detection
-⋮----
-// Quiescence reached - all events collected
-⋮----
-// Filter to our task IDs only
-⋮----
-// Reset quiescence timer on each new event
-⋮----
-// Check for duplicates
-⋮----
-// Track overall event counts (for single task tests)
-⋮----
-// Track per-task event counts (for concurrent task tests)
-⋮----
-// Track status sequence
-</file>
-
 <file path="shared/api/server.go">
 package api
 import (
@@ -2955,65 +3648,6 @@ func NewRouter(
 e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
 ⋮----
 // Attach template to context for HTMX fragment rendering
-</file>
-
-<file path="tests/e2e/task_test.go">
-package e2e_test
-import (
-	"context"
-	"testing"
-	"time"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-⋮----
-"context"
-"testing"
-"time"
-"github.com/stretchr/testify/assert"
-"github.com/stretchr/testify/require"
-⋮----
-// TestSingleTask verifies a 3-stage task emits progress events and reaches completed.
-func TestSingleTask(t *testing.T)
-⋮----
-const stageCount = 3
-// Connect SSE BEFORE submitting task to avoid missing events
-⋮----
-// Collect events until 1 second of silence
-⋮----
-// Verify task reached completed status
-⋮----
-// Executor emits 2 progress events per stage (start + complete)
-⋮----
-// Executor emits 2 status events (running, completed)
-⋮----
-// TestConcurrentTasks submits 3 tasks simultaneously and asserts all complete.
-func TestConcurrentTasks(t *testing.T)
-⋮----
-const numTasks = 3
-⋮----
-// Connect SSE BEFORE submitting tasks
-⋮----
-// Submit all tasks
-⋮----
-// Verify event counts for each task
-⋮----
-// TestStatusTransitions verifies the task emits SSE status events: running → completed.
-func TestStatusTransitions(t *testing.T)
-⋮----
-const stageCount = 2
-// Connect SSE BEFORE submitting task
-⋮----
-// Immediately check pending (task may have been picked up already)
-⋮----
-// Verify expected status sequence: running → completed
-// Note: pending is never emitted as an SSE event (only stored in DB)
-⋮----
-// Verify event counts
-⋮----
-// Verify final state in storage
-⋮----
-var found *taskResponse
 </file>
 
 <file path="shared/executor/executor.go">
@@ -3048,56 +3682,21 @@ func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts
 var stageDuration time.Duration
 </file>
 
-<file path="shared/api/handlers.go">
-package api
+<file path="tests/e2e/task_test.go">
+package e2e_test
 import (
-	"fmt"
-	"html/template"
-	"net/http"
-	"time"
-	"github.com/labstack/echo/v4"
-	"work-distribution-patterns/shared/contracts"
-	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
+	"os"
+	"testing"
+	"work-distribution-patterns/shared/testutil"
 )
 ⋮----
-"fmt"
-"html/template"
-"net/http"
-"time"
-"github.com/labstack/echo/v4"
-"work-distribution-patterns/shared/contracts"
-"work-distribution-patterns/shared/models"
-"work-distribution-patterns/shared/sse"
+"os"
+"testing"
+"work-distribution-patterns/shared/testutil"
 ⋮----
-type submitRequest struct {
-	Name       string `json:"name"        form:"name"`
-	StageCount int    `json:"stage_count" form:"stage_count"`
-}
-// SubmitTask handles POST /tasks.
-// The task manager is responsible for persisting the task and dispatching it.
-func SubmitTask(manager contracts.TaskManager) echo.HandlerFunc
-⋮----
-var req submitRequest
-⋮----
-// Return HTML fragment for HTMX requests; JSON for everything else.
-⋮----
-// ListTasks handles GET /tasks.
-func ListTasks(manager contracts.TaskManager) echo.HandlerFunc
-// GetTask handles GET /tasks/:id.
-func GetTask(manager contracts.TaskManager) echo.HandlerFunc
-// SSEStream handles GET /events — streams SSE events to the client.
-func SSEStream(hub *sse.Hub) echo.HandlerFunc
-⋮----
-// Send a comment to flush headers immediately
-⋮----
-// Heartbeat to keep connection alive
-⋮----
-// Index handles GET / — serves the HTMX frontend.
-func Index(tpl *template.Template) echo.HandlerFunc
-// Health handles GET /health — used by Docker health checks.
-// Registered before the logger middleware so health poll traffic is not logged.
-func Health() echo.HandlerFunc
+// baseURL returns the target API base URL (default: http://localhost:8080).
+func baseURL() string
+func TestE2E(t *testing.T)
 </file>
 
 <file path="shared/manager/manager.go">
@@ -3157,6 +3756,60 @@ func (m *Manager) runEventLoop(ctx context.Context)
 // runDeadlineLoop ticks at deadline/2 and re-dispatches tasks whose last
 // dispatch time is older than the deadline. Exits immediately if deadline == 0.
 func (m *Manager) runDeadlineLoop(ctx context.Context)
+</file>
+
+<file path="shared/api/handlers.go">
+package api
+import (
+	"fmt"
+	"html/template"
+	"net/http"
+	"time"
+	"github.com/labstack/echo/v4"
+	"work-distribution-patterns/shared/contracts"
+	"work-distribution-patterns/shared/health"
+	"work-distribution-patterns/shared/models"
+	"work-distribution-patterns/shared/sse"
+)
+⋮----
+"fmt"
+"html/template"
+"net/http"
+"time"
+"github.com/labstack/echo/v4"
+"work-distribution-patterns/shared/contracts"
+"work-distribution-patterns/shared/health"
+"work-distribution-patterns/shared/models"
+"work-distribution-patterns/shared/sse"
+⋮----
+type submitRequest struct {
+	Name       string `json:"name"        form:"name"`
+	StageCount int    `json:"stage_count" form:"stage_count"`
+}
+// SubmitTask handles POST /tasks.
+// The task manager is responsible for persisting the task and dispatching it.
+func SubmitTask(manager contracts.TaskManager) echo.HandlerFunc
+⋮----
+var req submitRequest
+⋮----
+// Return HTML fragment for HTMX requests; JSON for everything else.
+⋮----
+// ListTasks handles GET /tasks.
+func ListTasks(manager contracts.TaskManager) echo.HandlerFunc
+// GetTask handles GET /tasks/:id.
+func GetTask(manager contracts.TaskManager) echo.HandlerFunc
+// SSEStream handles GET /events — streams SSE events to the client.
+func SSEStream(hub *sse.Hub) echo.HandlerFunc
+⋮----
+// Send a comment to flush headers immediately
+⋮----
+// Heartbeat to keep connection alive
+⋮----
+// Index handles GET / — serves the HTMX frontend.
+func Index(tpl *template.Template) echo.HandlerFunc
+// Health handles GET /health — used by Docker health checks.
+// Registered before the logger middleware so health poll traffic is not logged.
+func Health() echo.HandlerFunc
 </file>
 
 </files>

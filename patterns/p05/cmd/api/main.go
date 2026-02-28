@@ -2,17 +2,11 @@ package main
 
 import (
 	"context"
-	"html/template"
 	"log"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/nats-io/nats.go"
 
-	"work-distribution-patterns/shared/api"
-	"work-distribution-patterns/shared/client"
-	"work-distribution-patterns/shared/events"
-	"work-distribution-patterns/shared/sse"
-	"work-distribution-patterns/shared/templates"
+	"work-distribution-patterns/patterns/p05/internal/app"
 )
 
 type config struct {
@@ -29,30 +23,14 @@ func main() {
 
 	ctx := context.Background()
 
-	nc, err := nats.Connect(cfg.NATSURL)
+	e, err := app.NewAPI(ctx, app.APIConfig{
+		ManagerURL: cfg.ManagerURL,
+		NATSURL:    cfg.NATSURL,
+	})
 	if err != nil {
-		log.Fatalf("nats connect: %v", err)
-	}
-	defer nc.Close()
-
-	taskManager := client.NewTaskManager(cfg.ManagerURL)
-	hub := sse.NewHub()
-
-	// Subscribe directly to NATS for events (distributed pub/sub).
-	bus := events.NewNATSBridge(nc, "task.events")
-	ch, _ := bus.Subscribe(ctx)
-	go func() {
-		for ev := range ch {
-			hub.Publish(ev)
-		}
-	}()
-
-	tpl, err := template.ParseFS(templates.FS, "index.html")
-	if err != nil {
-		log.Fatalf("parse template: %v", err)
+		log.Fatalf("setup: %v", err)
 	}
 
-	e := api.NewRouter(hub, tpl, taskManager)
 	log.Printf("Pattern 5 (Queue-and-Store) API listening on %s [manager=%s]", cfg.Addr, cfg.ManagerURL)
 	log.Fatal(e.Start(cfg.Addr))
 }
