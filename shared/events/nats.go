@@ -29,7 +29,7 @@ func (n *NATSBridge) Publish(event models.TaskEvent) {
 		return
 	}
 	subject := fmt.Sprintf("%s.%s", n.prefix, event.TaskID)
-	_ = n.nc.Publish(subject, data) //nolint:errcheck
+	_ = n.nc.Publish(subject, data)
 }
 
 func (n *NATSBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error) {
@@ -51,7 +51,7 @@ func (n *NATSBridge) Subscribe(ctx context.Context) (<-chan models.TaskEvent, er
 
 	go func() {
 		<-ctx.Done()
-		_ = sub.Unsubscribe() //nolint:errcheck
+		_ = sub.Unsubscribe()
 		close(ch)
 	}()
 

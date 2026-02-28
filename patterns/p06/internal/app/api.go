@@ -55,7 +55,7 @@ func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error) {
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
-		_ = eventsSub.Shutdown(ctx) //nolint:errcheck
+		_ = eventsSub.Shutdown(ctx)
 		return nil, err
 	}
 

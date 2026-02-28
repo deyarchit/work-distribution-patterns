@@ -108,9 +108,9 @@ func (d *PubSubDispatcher) ReceiveEvent(ctx context.Context) (models.TaskEvent, 
 // Shutdown closes the underlying Go Cloud resources.
 func (d *PubSubDispatcher) Shutdown(ctx context.Context) {
 	if d.tasksTopic != nil {
-		_ = d.tasksTopic.Shutdown(ctx) //nolint:errcheck
+		_ = d.tasksTopic.Shutdown(ctx)
 	}
 	if d.eventsSub != nil {
-		_ = d.eventsSub.Shutdown(ctx) //nolint:errcheck
+		_ = d.eventsSub.Shutdown(ctx)
 	}
 }

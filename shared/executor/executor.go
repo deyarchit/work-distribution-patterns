@@ -24,14 +24,14 @@ type Executor struct {
 func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts.TaskConsumer) {
 	total := len(task.Stages)
 
-	_ = consumer.Emit(ctx, models.TaskEvent{ //nolint:errcheck
+	_ = consumer.Emit(ctx, models.TaskEvent{
 		Type:   models.EventTaskStatus,
 		TaskID: task.ID,
 		Status: string(models.TaskRunning),
 	})
 
 	for stageIdx, stage := range task.Stages {
-		_ = consumer.Emit(ctx, models.TaskEvent{ //nolint:errcheck
+		_ = consumer.Emit(ctx, models.TaskEvent{
 			Type:      models.EventProgress,
 			TaskID:    task.ID,
 			StageName: stage.Name,
@@ -45,7 +45,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts
 
 		select {
 		case <-ctx.Done():
-			_ = consumer.Emit(ctx, models.TaskEvent{ //nolint:errcheck
+			_ = consumer.Emit(ctx, models.TaskEvent{
 				Type:   models.EventTaskStatus,
 				TaskID: task.ID,
 				Status: string(models.TaskFailed),
@@ -54,7 +54,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts
 		case <-time.After(stageDuration):
 		}
 
-		_ = consumer.Emit(ctx, models.TaskEvent{ //nolint:errcheck
+		_ = consumer.Emit(ctx, models.TaskEvent{
 			Type:      models.EventProgress,
 			TaskID:    task.ID,
 			StageName: stage.Name,
@@ -62,7 +62,7 @@ func (e *Executor) Run(ctx context.Context, task models.Task, consumer contracts
 		})
 	}
 
-	_ = consumer.Emit(ctx, models.TaskEvent{ //nolint:errcheck
+	_ = consumer.Emit(ctx, models.TaskEvent{
 		Type:   models.EventTaskStatus,
 		TaskID: task.ID,
 		Status: string(models.TaskCompleted),

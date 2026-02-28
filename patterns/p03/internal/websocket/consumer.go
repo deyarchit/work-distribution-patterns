@@ -137,9 +137,9 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		for {
 			select {
 			case msg, ok := <-send:
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if !ok {
-					_ = conn.WriteMessage(websocket.CloseMessage, []byte{}) //nolint:errcheck
+					_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
 					return
 				}
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
@@ -147,7 +147,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 					return
 				}
 			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
@@ -161,9 +161,9 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 	}
 	send <- ready
 
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck //nolint:errcheck
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
@@ -172,10 +172,10 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		case <-ctx.Done():
 			close(send)
 			<-done
-			_ = conn.Close() //nolint:errcheck
+			_ = conn.Close()
 			return nil
 		case <-done:
-			_ = conn.Close() //nolint:errcheck
+			_ = conn.Close()
 			return nil
 		default:
 		}
@@ -187,7 +187,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 			}
 			return nil
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck //nolint:errcheck
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		var msg taskMsg
 		if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != msgTypeTask {
@@ -199,7 +199,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		case <-ctx.Done():
 			close(send)
 			<-done
-			_ = conn.Close() //nolint:errcheck
+			_ = conn.Close()
 			return nil
 		}
 	}

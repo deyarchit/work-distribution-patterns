@@ -74,9 +74,9 @@ func (c *PubSubConsumer) Emit(ctx context.Context, event models.TaskEvent) error
 // Shutdown closes the underlying Go Cloud resources.
 func (c *PubSubConsumer) Shutdown(ctx context.Context) {
 	if c.tasksSub != nil {
-		_ = c.tasksSub.Shutdown(ctx) //nolint:errcheck
+		_ = c.tasksSub.Shutdown(ctx)
 	}
 	if c.eventsTopic != nil {
-		_ = c.eventsTopic.Shutdown(ctx) //nolint:errcheck
+		_ = c.eventsTopic.Shutdown(ctx)
 	}
 }

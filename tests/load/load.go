@@ -68,13 +68,13 @@ func main() {
 				atomic.AddInt64(&failed, 1)
 				return
 			}
-			defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusAccepted {
 				atomic.AddInt64(&failed, 1)
 				return
 			}
 			var sr submitResponse
-			_ = json.NewDecoder(resp.Body).Decode(&sr) //nolint:errcheck
+			_ = json.NewDecoder(resp.Body).Decode(&sr)
 			atomic.AddInt64(&submitted, 1)
 			mu.Lock()
 			taskIDs = append(taskIDs, sr.ID)
@@ -102,8 +102,8 @@ func main() {
 				continue
 			}
 			var tr taskResponse
-			_ = json.NewDecoder(resp.Body).Decode(&tr) //nolint:errcheck
-			_ = resp.Body.Close()                      //nolint:errcheck
+			_ = json.NewDecoder(resp.Body).Decode(&tr)
+			_ = resp.Body.Close()
 			if tr.Status == "completed" || tr.Status == "failed" {
 				if tr.Status == "completed" {
 					atomic.AddInt64(&completed, 1)
