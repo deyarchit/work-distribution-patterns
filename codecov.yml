@@ -1,0 +1,15 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto  # compare against base branch; fail only if coverage drops
+        threshold: 3% # allow up to 3% drop before flagging
+    patch:
+      default:
+        target: 60% # do not flag a PR if the changed lines are at least 60% covered
+        threshold: 3%
+
+comment:
+  layout: "diff, files"
+  behavior: default
+  require_changes: true # only post a comment when coverage metrics actually change
