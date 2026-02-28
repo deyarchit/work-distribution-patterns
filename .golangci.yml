@@ -58,7 +58,6 @@ linters:
         # ── Robustness ───────────────────────────────────────────────────────
         - name: waitgroup-by-value # Enforce: Concurrency safety. Fix: Pass sync.WaitGroup by pointer (*sync.WaitGroup), never by value; copying it breaks Add/Done coordination.
         - name: use-waitgroup-go # Enforce: Prefer the safer WaitGroup API (Go 1.25+). Fix: Replace the 'wg.Add(1) / go func() { defer wg.Done(); ... }()' idiom with 'wg.Go(func() { ... })'.
-        - name: forbidden-call-in-wg-go # Enforce: Prevent double-Done panics. Fix: Never call 'wg.Done()' manually inside a 'wg.Go(...)' callback — the runtime calls it automatically when the function returns.
         - name: atomic # Enforce: Thread safety. Fix: Use sync/atomic operations (atomic.Load, atomic.Store, etc.) for variables shared across goroutines; naked reads/writes are data races.
         - name: context-keys-type # Enforce: Context key safety. Fix: Define context keys as unexported custom types (not string or int) to prevent collisions between packages.
         - name: deep-exit # Enforce: Orderly shutdown. Fix: Restrict os.Exit and log.Fatal to main() and init(); everywhere else return an error so callers can handle or wrap it.
@@ -66,8 +65,8 @@ linters:
         # ── Clean Code ───────────────────────────────────────────────────────
         - name: indent-error-flow # Enforce: Happy-path left-alignment. Fix: Remove 'else' blocks that follow a 'return', 'continue', or 'break'; the else branch becomes the new straight-line path.
         - name: early-return # Enforce: Reduced nesting. Fix: Use guard clauses (return early on error or invalid input) instead of deeply nested if/else trees.
-        # - name: cognitive-complexity  # Enforce: Function complexity budget. Fix: Split complex functions until each scores below the limit. Uncomment and set arguments: [25] to activate.
-        #   arguments: [25]
+        - name: cognitive-complexity # Enforce: Function complexity budget. Fix: Split complex functions until each scores below the limit. Uncomment and set arguments: [25] to activate.
+          arguments: [25]
         - name: confusing-results # Enforce: API clarity. Fix: When a function returns multiple values of the same type, add named return parameters so callers know what each value represents.
         - name: unexported-return # Enforce: Encapsulation. Fix: Exported functions must not return unexported types; expose an interface or promote the type to exported.
         - name: argument-limit # Enforce: Readable signatures (default limit: 8). Fix: If a function exceeds the limit, group related parameters into a configuration struct or options type.

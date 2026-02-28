@@ -29,6 +29,53 @@ type taskResponse struct {
 	Status string `json:"status"`
 }
 
+func submitTask(apiURL string, stages int, submitted, failed *int64, mu *sync.Mutex, taskIDs *[]string) {
+	body, marshalErr := json.Marshal(submitRequest{
+		Name:       fmt.Sprintf("load-%d", rand.Int63()),
+		StageCount: stages,
+	})
+	if marshalErr != nil {
+		atomic.AddInt64(failed, 1)
+		return
+	}
+	resp, err := http.Post(apiURL+"/tasks", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		atomic.AddInt64(failed, 1)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusAccepted {
+		atomic.AddInt64(failed, 1)
+		return
+	}
+	var sr submitResponse
+	_ = json.NewDecoder(resp.Body).Decode(&sr)
+	atomic.AddInt64(submitted, 1)
+	mu.Lock()
+	*taskIDs = append(*taskIDs, sr.ID)
+	mu.Unlock()
+}
+
+func pollUntilDone(apiURL, id string, pollDeadline time.Time, completed *int64) {
+	for time.Now().Before(pollDeadline) {
+		resp, err := http.Get(fmt.Sprintf("%s/tasks/%s", apiURL, id))
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		var tr taskResponse
+		_ = json.NewDecoder(resp.Body).Decode(&tr)
+		_ = resp.Body.Close()
+		if tr.Status == "completed" || tr.Status == "failed" {
+			if tr.Status == "completed" {
+				atomic.AddInt64(completed, 1)
+			}
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 func main() {
 	url := flag.String("url", "http://localhost:8080", "API base URL")
 	rate := flag.Float64("rate", 2.0, "Tasks per second")
@@ -54,32 +101,7 @@ func main() {
 	ticker := time.NewTicker(interval)
 	for time.Now().Before(deadline) {
 		<-ticker.C
-		go func() {
-			body, marshalErr := json.Marshal(submitRequest{
-				Name:       fmt.Sprintf("load-%d", rand.Int63()),
-				StageCount: *stages,
-			})
-			if marshalErr != nil {
-				atomic.AddInt64(&failed, 1)
-				return
-			}
-			resp, err := http.Post(*url+"/tasks", "application/json", strings.NewReader(string(body)))
-			if err != nil {
-				atomic.AddInt64(&failed, 1)
-				return
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusAccepted {
-				atomic.AddInt64(&failed, 1)
-				return
-			}
-			var sr submitResponse
-			_ = json.NewDecoder(resp.Body).Decode(&sr)
-			atomic.AddInt64(&submitted, 1)
-			mu.Lock()
-			taskIDs = append(taskIDs, sr.ID)
-			mu.Unlock()
-		}()
+		go submitTask(*url, *stages, &submitted, &failed, &mu, &taskIDs)
 	}
 	ticker.Stop()
 
@@ -95,23 +117,7 @@ func main() {
 	mu.Unlock()
 
 	for _, id := range ids {
-		for time.Now().Before(pollDeadline) {
-			resp, err := http.Get(fmt.Sprintf("%s/tasks/%s", *url, id))
-			if err != nil {
-				time.Sleep(500 * time.Millisecond)
-				continue
-			}
-			var tr taskResponse
-			_ = json.NewDecoder(resp.Body).Decode(&tr)
-			_ = resp.Body.Close()
-			if tr.Status == "completed" || tr.Status == "failed" {
-				if tr.Status == "completed" {
-					atomic.AddInt64(&completed, 1)
-				}
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
+		pollUntilDone(*url, id, pollDeadline, &completed)
 	}
 
 	total := atomic.LoadInt64(&submitted)

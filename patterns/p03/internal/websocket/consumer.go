@@ -125,35 +125,39 @@ func (c *WebSocketConsumer) Emit(_ context.Context, event models.TaskEvent) erro
 	return nil
 }
 
+// runWritePump drains the send channel and writes frames to conn until send is
+// closed or a write error occurs. It signals completion by closing done.
+func (c *WebSocketConsumer) runWritePump(conn *websocket.Conn, send <-chan []byte, done chan struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case msg, ok := <-send:
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if !ok {
+				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				log.Printf("write error: %v", err)
+				return
+			}
+		case <-ticker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
 // runConn manages one connection lifecycle: write pump + read loop.
 func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, send chan []byte) error {
 	done := make(chan struct{})
 
 	// Write pump — only goroutine that writes to conn.
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case msg, ok := <-send:
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if !ok {
-					_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
-					return
-				}
-				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					log.Printf("write error: %v", err)
-					return
-				}
-			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					return
-				}
-			}
-		}
-	}()
+	go c.runWritePump(conn, send, done)
 
 	ready, err := json.Marshal(readyMsg{Type: "ready"})
 	if err != nil {
