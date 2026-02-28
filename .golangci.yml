@@ -1,48 +1,44 @@
-version: "2"  # Only supported value for golangci-lint v2; triggers v2 config format validation.
+version: "2" # Triggers v2 config format validation.
 
 linters:
-  default: none  # Opt-in mode: only explicitly listed linters run (avoids surprise breakage when
-                 # golangci-lint adds new linters in a future release).
+  # Opt-in mode: only explicitly listed linters run (avoids surprise breakage when
+  # golangci-lint adds new linters in a future release).
+  default: none
+
   enable:
     # ── Correctness ──────────────────────────────────────────────────────────
-    - errcheck       # Flags unhandled error return values; the #1 source of silent failures in Go.
-    - govet          # Runs go vet analysers (e.g. printf format mismatches, unreachable code, etc.).
-    - staticcheck    # Comprehensive static analysis suite; v2 absorbed the old gosimple linter.
-    - ineffassign    # Detects assignments whose result is never read before being overwritten.
-    - unused         # Flags unexported identifiers (types, funcs, consts) that are never referenced.
-    - nilerr         # Catches `if err != nil { return nil }` — returning nil hides real errors.
-    - errorlint      # Enforces errors.Is/As instead of == and type assertions; required for wrapped errors.
-    - bodyclose      # Ensures http.Response.Body is closed; unclosed bodies leak goroutines/connections.
-    - durationcheck  # Catches time.Duration * time.Duration multiplications (usually a unit bug).
+    - errcheck # Flags unhandled error return values; the #1 source of silent failures in Go.
+    - govet # Runs go vet analysers (e.g. printf format mismatches, unreachable code, etc.).
+    - staticcheck # Comprehensive static analysis suite; v2 absorbed the old gosimple linter.
+    - ineffassign # Detects assignments whose result is never read before being overwritten.
+    - unused # Flags unexported identifiers (types, funcs, consts) that are never referenced.
+    - nilerr # Catches `if err != nil { return nil }` — returning nil hides real errors.
+    - errorlint # Enforces errors.Is/As instead of == and type assertions; required for wrapped errors.
+    - bodyclose # Ensures http.Response.Body is closed; unclosed bodies leak goroutines/connections.
+    - durationcheck # Catches time.Duration * time.Duration multiplications (usually a unit bug).
 
     # ── Style / simplification ───────────────────────────────────────────────
-    - unconvert  # Removes redundant type conversions (e.g. int(someInt)).
-    - unparam    # Flags function parameters that always receive the same constant argument.
-    - misspell   # Corrects common English spelling mistakes in comments and string literals.
+    - unconvert # Removes redundant type conversions (e.g. int(someInt)).
+    - unparam # Flags function parameters that always receive the same constant argument.
+    - misspell # Corrects common English spelling mistakes in comments and string literals.
+
+  settings:
+    errcheck:
+      check-type-assertions: true # Flag `x.(T)` when the second (ok) return value is discarded.
+      check-blank: true # Flag `_ = f()` when f returns an error.
+    govet:
+      enable:
+        - shadow # Report variables in inner scopes that shadow an outer-scope variable.
+    errorlint:
+      errorf: true # Require %w (not %v) in fmt.Errorf.
+      asserts: true # Disallow direct type assertions on error values.
+      comparison: true # Disallow err == ErrFoo; use errors.Is.
 
 formatters:
   enable:
-    - gofmt      # Standard Go formatter; enforces canonical indentation and brace style.
-    - goimports  # Superset of gofmt: also groups and sorts import blocks (stdlib / external / internal).
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true  # Flag `x.(T)` when the second (ok) return value is discarded — panics at runtime if wrong type.
-    check-blank: true            # Flag `_ = f()` when f returns an error — ignoring via blank identifier hides failures.
-  govet:
-    enable:
-      - shadow  # Report variables in inner scopes that shadow an outer-scope variable of the same name.
-  errorlint:
-    errorf: true      # Require %w (not %v) in fmt.Errorf so callers can unwrap with errors.Is/As.
-    asserts: true     # Disallow direct type assertions on error values; use errors.As instead.
-    comparison: true  # Disallow err == ErrFoo; use errors.Is(err, ErrFoo) to handle wrapping.
+    - gofmt # Standard Go formatter; enforces canonical indentation and brace style.
+    - goimports # Superset of gofmt: also groups and sorts import blocks.
 
 issues:
-  exclude-use-default: false  # Do NOT apply golangci-lint's built-in suppression list — it silences real issues.
-  max-issues-per-linter: 0   # Remove the default cap (10) so every issue from every linter is reported.
-  max-same-issues: 0         # Remove the default cap (3) on identical messages so duplicates aren't hidden.
-  exclude-rules:
-    # bodyclose cannot follow Body.Close() calls made inside goroutines (SSEClient in helpers_test.go
-    # defers the close inside a launched goroutine, which the linter's data-flow analysis can't see).
-    - linters: [bodyclose]
-      path: "tests/e2e/helpers_test.go"
+  max-issues-per-linter: 0 # Remove the default cap (10) so every issue is reported.
+  max-same-issues: 0 # Remove the default cap (3) on identical messages.
