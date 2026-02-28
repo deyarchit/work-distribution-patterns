@@ -47,11 +47,6 @@ Read only the codemaps affected by the identified changes and apply targeted edi
 | `docs/CODEMAPS/frontend.md` | changes in UI templates, client-side logic, or component structure |
 | `docs/CODEMAPS/dependencies.md` | dependency manifest changes, new env vars, container/build changes |
 
-Update the freshness header in every file you touch:
-```
-<!-- Commit: <HEAD_SHA> | Files scanned: N | Token estimate: ~T -->
-```
-
 ### Rationale Log (optional)
 
 Only if the diff contains decisions that materially affect architecture or interfaces — append a new entry to `docs/CODEMAPS/rationale.md` (create it if absent). Skip this entirely for routine changes (refactors, simplifications, config tweaks, test fixes).
@@ -71,18 +66,15 @@ Commits: `<BASE_SHA_SHORT>..<HEAD_SHA_SHORT>`
 
 Keep each run's block under ~200 tokens. Snippets are optional.
 
-## Step 4: Update codemap-diff.txt
+## Step 4: Finalise
 
-Overwrite `.reports/codemap-diff.txt` with:
+Once all codemap edits are complete, run:
 
-```
-last-sha: <HEAD_SHA>
-updated: <YYYY-MM-DD>
-commit-range: <BASE_SHA_SHORT>..<HEAD_SHA_SHORT>
-codemaps-touched: <space-separated list of files updated>
+```bash
+bash ./scripts/finalize.sh
 ```
 
-No narrative prose — just these structured fields for machine readability.
+This writes `.reports/codemap-diff.txt` with the correct HEAD SHA and commit range. Only call this after analysis succeeds — if anything failed, skip it so the next run reprocesses the same commits.
 
 ## Tips
 

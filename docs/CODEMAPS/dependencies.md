@@ -10,8 +10,8 @@
 | `github.com/gorilla/websocket` | v1.5.3 | WebSocket transport (Pattern 3) |
 | `google.golang.org/grpc` | v1.x | gRPC framework (Pattern 4) |
 | `google.golang.org/protobuf` | v1.x | Protocol buffer runtime (Pattern 4) |
-| `github.com/nats-io/nats.go` | v1.48.0 | NATS JetStream client (Pattern 5) |
-| `github.com/jackc/pgx/v5` | v5.8.0 | PostgreSQL driver + `pgxpool` connection pool (Pattern 5) |
+| `github.com/nats-io/nats.go` | v1.48.0 | NATS JetStream client (Pattern 5/6) |
+| `github.com/jackc/pgx/v5` | v5.8.0 | PostgreSQL driver + `pgxpool` connection pool (Pattern 5/6) |
 | `github.com/google/uuid` | v1.6.0 | Task ID generation |
 | `github.com/kelseyhightower/envconfig` | v1.4.0 | Struct-based env config loading (all patterns) |
 | `gocloud.dev` | v0.41.0 | Cloud-agnostic abstraction for pub/sub (Pattern 6) |
@@ -20,6 +20,9 @@
 | `github.com/aws/aws-sdk-go-v2/config` | v1.41+ | AWS SDK v2 config loader (Pattern 6 AWS) |
 | `github.com/aws/aws-sdk-go-v2/service/sns` | v1.39+ | AWS SNS client (Pattern 6 AWS) |
 | `github.com/aws/aws-sdk-go-v2/service/sqs` | v1.42+ | AWS SQS client (Pattern 6 AWS) |
+| `github.com/testcontainers/testcontainers-go` | v0.x | Container orchestration for tests (integration tests) |
+| `github.com/testcontainers/testcontainers-go/modules/nats` | v0.x | NATS test container (P5/P6 integration tests) |
+| `github.com/testcontainers/testcontainers-go/modules/postgres` | v0.x | PostgreSQL test container (P5/P6 integration tests) |
 
 ## Environment Variables
 

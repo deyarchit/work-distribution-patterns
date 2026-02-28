@@ -13,8 +13,18 @@ REPORT_FILE=".reports/codemap-diff.txt"
 
 echo -e "${BLUE}=== Codemap Update Context ===${NC}\n"
 
+# Step 0: Require a clean working tree
+echo -e "${YELLOW}[0/4] Checking working tree...${NC}"
+if [ -n "$(git status --porcelain)" ]; then
+    echo -e "${RED}✗ Working tree has uncommitted changes. Commit or stash them before updating codemaps.${NC}"
+    echo -e "${YELLOW}  git stash        — stash changes, run the skill, then git stash pop${NC}"
+    echo -e "${YELLOW}  git commit -am   — commit everything, then run the skill${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Working tree is clean${NC}\n"
+
 # Step 1: Extract last processed SHA
-echo -e "${YELLOW}[1/5] Checking last processed commit...${NC}"
+echo -e "${YELLOW}[1/4] Checking last processed commit...${NC}"
 LAST_SHA=$(grep '^last-sha:' "$REPORT_FILE" 2>/dev/null | awk '{print $2}' || echo "")
 
 if [ -z "$LAST_SHA" ]; then
@@ -26,13 +36,13 @@ else
 fi
 
 # Step 2: Get current HEAD
-echo -e "\n${YELLOW}[2/5] Getting current HEAD...${NC}"
+echo -e "\n${YELLOW}[2/4] Getting current HEAD...${NC}"
 HEAD_SHA=$(git rev-parse HEAD)
 HEAD_SHORT=$(git rev-parse --short HEAD)
 echo -e "Current HEAD: ${GREEN}$HEAD_SHA${NC} ($HEAD_SHORT)"
 
 # Step 3: Check for new commits
-echo -e "\n${YELLOW}[3/5] Checking for new commits...${NC}"
+echo -e "\n${YELLOW}[3/4] Checking for new commits...${NC}"
 if [ -n "$BASE_SHA" ]; then
     NEW_COMMITS=$(git log "$BASE_SHA..HEAD" --oneline 2>/dev/null || echo "")
     if [ -z "$NEW_COMMITS" ]; then
@@ -49,7 +59,7 @@ COMMIT_COUNT=$(echo "$NEW_COMMITS" | wc -l | tr -d ' ')
 echo -e "Found ${GREEN}$COMMIT_COUNT${NC} new commit(s)"
 
 # Step 4: Collect diff
-echo -e "\n${YELLOW}[4/5] Collecting changes...${NC}"
+echo -e "\n${YELLOW}[4/4] Collecting changes...${NC}"
 if [ -n "$BASE_SHA" ]; then
     DIFF_NAMES=$(git diff "$BASE_SHA..HEAD" --name-status)
 else
@@ -60,8 +70,7 @@ fi
 FILE_COUNT=$(echo "$DIFF_NAMES" | grep -v '^$' | wc -l | tr -d ' ')
 echo -e "Changed files: ${GREEN}$FILE_COUNT${NC}"
 
-# Step 5: Output structured report
-echo -e "\n${YELLOW}[5/5] Generating report...${NC}"
+# Output structured report
 
 echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}METADATA${NC}"
