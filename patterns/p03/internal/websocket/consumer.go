@@ -137,9 +137,9 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		for {
 			select {
 			case msg, ok := <-send:
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
 				if !ok {
-					_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
+					_ = conn.WriteMessage(websocket.CloseMessage, []byte{}) //nolint:errcheck
 					return
 				}
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
@@ -147,7 +147,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 					return
 				}
 			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
@@ -155,12 +155,15 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		}
 	}()
 
-	ready, _ := json.Marshal(readyMsg{Type: "ready"})
+	ready, err := json.Marshal(readyMsg{Type: "ready"})
+	if err != nil {
+		return err
+	}
 	send <- ready
 
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
 	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck //nolint:errcheck
 		return nil
 	})
 
@@ -169,10 +172,10 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		case <-ctx.Done():
 			close(send)
 			<-done
-			_ = conn.Close()
+			_ = conn.Close() //nolint:errcheck
 			return nil
 		case <-done:
-			_ = conn.Close()
+			_ = conn.Close() //nolint:errcheck
 			return nil
 		default:
 		}
@@ -184,7 +187,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 			}
 			return nil
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck //nolint:errcheck
 
 		var msg taskMsg
 		if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != msgTypeTask {
@@ -196,7 +199,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		case <-ctx.Done():
 			close(send)
 			<-done
-			_ = conn.Close()
+			_ = conn.Close() //nolint:errcheck
 			return nil
 		}
 	}

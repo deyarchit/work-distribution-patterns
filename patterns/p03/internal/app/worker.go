@@ -22,7 +22,9 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	consumer := wsinternal.NewWebSocketConsumer(cfg.ManagerWSURL)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	_ = consumer.Connect(ctx)
+	if err := consumer.Connect(ctx); err != nil {
+		return
+	}
 
 	for {
 		task, err := consumer.Receive(ctx)

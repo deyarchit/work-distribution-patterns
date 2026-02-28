@@ -17,6 +17,16 @@ linters:
     - bodyclose # Ensures http.Response.Body is closed; unclosed bodies leak goroutines/connections.
     - durationcheck # Catches time.Duration * time.Duration multiplications (usually a unit bug).
 
+    # ── Security & Safety ────────────────────────────────────────────────────
+    # - gosec # Security scanner for SQLi, weak crypto, etc.
+    - copyloopvar # Essential for Go 1.22 loop variable safety.
+
+    # ── Clean Code & Performance ─────────────────────────────────────────────
+    - revive # Advanced replacement for golint.
+    - gocritic # Diagnostic and performance checks.
+    # - perfsprint # Suggests faster alternatives to fmt.Sprintf.
+    - unparam # Flags unused function parameters.
+
     # ── Style / simplification ───────────────────────────────────────────────
     - unconvert # Removes redundant type conversions (e.g. int(someInt)).
     - unparam # Flags function parameters that always receive the same constant argument.
@@ -33,6 +43,15 @@ linters:
       errorf: true # Require %w (not %v) in fmt.Errorf.
       asserts: true # Disallow direct type assertions on error values.
       comparison: true # Disallow err == ErrFoo; use errors.Is.
+    gosec:
+      excludes:
+        - G104 # Duplicates errcheck; safe to disable to reduce noise
+        - G115 # Integer overflow (can be very noisy, enable only if you do heavy math)
+    revive:
+      rules:
+        - name: var-naming # Enforces proper initialisms (URL vs Url, API vs Api)
+        - name: indent-error-flow # Flags 'else' after a return; keeps code flat
+        - name: context-as-argument # Ensures Context is always the first param
 
 formatters:
   enable:

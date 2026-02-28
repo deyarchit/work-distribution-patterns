@@ -32,7 +32,11 @@ func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error) {
 	hub := sse.NewHub()
 
 	bus := events.NewNATSBridge(nc, "task.events")
-	ch, _ := bus.Subscribe(ctx)
+	ch, err := bus.Subscribe(ctx)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

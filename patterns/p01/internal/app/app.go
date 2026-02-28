@@ -38,7 +38,10 @@ func New(ctx context.Context, cfg Config) (*echo.Echo, error) {
 	mgr := manager.New(taskStore, dispatcher, bus, 0)
 	mgr.Start(ctx)
 
-	ch, _ := bus.Subscribe(ctx)
+	ch, err := bus.Subscribe(ctx)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

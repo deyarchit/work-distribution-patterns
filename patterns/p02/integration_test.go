@@ -44,7 +44,7 @@ func startServer(t *testing.T, e *echo.Echo) string {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { _ = e.Shutdown(context.Background()) })
-	go func() { _ = e.Server.Serve(ln) }()
+	t.Cleanup(func() { _ = e.Shutdown(context.Background()) }) //nolint:errcheck
+	go func() { _ = e.Server.Serve(ln) }()                     //nolint:errcheck
 	return "http://" + ln.Addr().String()
 }

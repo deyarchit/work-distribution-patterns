@@ -57,10 +57,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 		return nil, err
 	}
 
-	if err := natsinternal.SetupJetStream(js); err != nil {
-		// Non-fatal: streams may already exist.
-		_ = err
-	}
+	_ = natsinternal.SetupJetStream(js) //nolint:errcheck
 
 	bus := events.NewNATSBridge(nc, "task.events")
 	dispatcher := natsinternal.NewNATSDispatcher(nc, js)

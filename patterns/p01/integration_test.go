@@ -27,8 +27,8 @@ func TestP1Integration(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	baseURL := "http://" + ln.Addr().String()
-	t.Cleanup(func() { _ = e.Shutdown(context.Background()) })
-	go func() { _ = e.Server.Serve(ln) }()
+	t.Cleanup(func() { _ = e.Shutdown(context.Background()) }) //nolint:errcheck
+	go func() { _ = e.Server.Serve(ln) }()                     //nolint:errcheck
 
 	testutil.WaitReady(t, baseURL)
 	testutil.RunSuite(t, baseURL)

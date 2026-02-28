@@ -47,7 +47,7 @@ func (m *Manager) Submit(ctx context.Context, task models.Task) error {
 	}
 
 	if err := m.dispatcher.Dispatch(ctx, task); err != nil {
-		_ = m.store.SetStatus(task.ID, models.TaskFailed)
+		_ = m.store.SetStatus(task.ID, models.TaskFailed) //nolint:errcheck
 		switch {
 		case errors.Is(err, dispatch.ErrDispatchFull):
 			return echo.NewHTTPError(http.StatusTooManyRequests, "task queue is full — retry later").
@@ -60,7 +60,7 @@ func (m *Manager) Submit(ctx context.Context, task models.Task) error {
 		}
 	}
 
-	_ = m.store.SetDispatchedAt(task.ID, time.Now())
+	_ = m.store.SetDispatchedAt(task.ID, time.Now()) //nolint:errcheck
 	return nil
 }
 
@@ -101,7 +101,7 @@ func (m *Manager) runEventLoop(ctx context.Context) {
 		if event.Type == models.EventTaskStatus {
 			status := models.TaskStatus(event.Status)
 			if status == models.TaskCompleted || status == models.TaskFailed {
-				_ = m.store.SetStatus(event.TaskID, status)
+				_ = m.store.SetStatus(event.TaskID, status) //nolint:errcheck
 			}
 		}
 		m.events.Publish(event)
@@ -127,8 +127,8 @@ func (m *Manager) runDeadlineLoop(ctx context.Context) {
 					continue
 				}
 				if task.DispatchedAt != nil && now.Sub(*task.DispatchedAt) > m.deadline {
-					_ = m.dispatcher.Dispatch(ctx, task)
-					_ = m.store.SetDispatchedAt(task.ID, now)
+					_ = m.dispatcher.Dispatch(ctx, task)      //nolint:errcheck
+					_ = m.store.SetDispatchedAt(task.ID, now) //nolint:errcheck
 				}
 			}
 		}

@@ -24,7 +24,10 @@ func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error) {
 	hub := sse.NewHub()
 
 	sseClient := sse.NewClient(cfg.ManagerURL + "/events")
-	ch, _ := sseClient.Subscribe(ctx)
+	ch, err := sseClient.Subscribe(ctx)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		for ev := range ch {
 			hub.Publish(ev)

@@ -49,7 +49,7 @@ func (m *RemoteTaskManager) Submit(ctx context.Context, task models.Task) error 
 	if err != nil {
 		return err
 	}
-	_ = resp.Body.Close()
+	_ = resp.Body.Close() //nolint:errcheck
 
 	switch resp.StatusCode {
 	case http.StatusAccepted, http.StatusOK:
@@ -75,7 +75,7 @@ func (m *RemoteTaskManager) Get(ctx context.Context, id string) (models.Task, bo
 	if err != nil {
 		return models.Task{}, false
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return models.Task{}, false
@@ -100,7 +100,7 @@ func (m *RemoteTaskManager) List(ctx context.Context) []models.Task {
 	if err != nil {
 		return []models.Task{}
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	var tasks []models.Task
 	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {

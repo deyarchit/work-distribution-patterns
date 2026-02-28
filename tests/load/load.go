@@ -52,32 +52,36 @@ func main() {
 
 	// Submission loop
 	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		<-ticker.C
 		go func() {
-			body, _ := json.Marshal(submitRequest{
+			body, marshalErr := json.Marshal(submitRequest{
 				Name:       fmt.Sprintf("load-%d", rand.Int63()),
 				StageCount: *stages,
 			})
+			if marshalErr != nil {
+				atomic.AddInt64(&failed, 1)
+				return
+			}
 			resp, err := http.Post(*url+"/tasks", "application/json", strings.NewReader(string(body)))
 			if err != nil {
 				atomic.AddInt64(&failed, 1)
 				return
 			}
-			defer func() { _ = resp.Body.Close() }()
+			defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 			if resp.StatusCode != http.StatusAccepted {
 				atomic.AddInt64(&failed, 1)
 				return
 			}
 			var sr submitResponse
-			_ = json.NewDecoder(resp.Body).Decode(&sr)
+			_ = json.NewDecoder(resp.Body).Decode(&sr) //nolint:errcheck
 			atomic.AddInt64(&submitted, 1)
 			mu.Lock()
 			taskIDs = append(taskIDs, sr.ID)
 			mu.Unlock()
 		}()
 	}
+	ticker.Stop()
 
 	// Wait up to 120s for tasks to complete (server configures stage duration)
 	pollTimeout := 120 * time.Second
@@ -98,8 +102,8 @@ func main() {
 				continue
 			}
 			var tr taskResponse
-			_ = json.NewDecoder(resp.Body).Decode(&tr)
-			_ = resp.Body.Close()
+			_ = json.NewDecoder(resp.Body).Decode(&tr) //nolint:errcheck
+			_ = resp.Body.Close()                      //nolint:errcheck
 			if tr.Status == "completed" || tr.Status == "failed" {
 				if tr.Status == "completed" {
 					atomic.AddInt64(&completed, 1)
