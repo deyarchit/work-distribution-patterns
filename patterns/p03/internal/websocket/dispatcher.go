@@ -131,21 +131,21 @@ func (wc *workerConn) writePump() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer func() {
 		ticker.Stop()
-		_ = wc.conn.Close()
+		_ = wc.conn.Close() //nolint:errcheck
 	}()
 	for {
 		select {
 		case msg, ok := <-wc.send:
-			_ = wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
 			if !ok {
-				_ = wc.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = wc.conn.WriteMessage(websocket.CloseMessage, []byte{}) //nolint:errcheck
 				return
 			}
 			if err := wc.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 				return
 			}
 		case <-ticker.C:
-			_ = wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
 			if err := wc.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -160,14 +160,14 @@ func (wc *workerConn) readPump() {
 	defer func() {
 		wc.hub.remove(wc)
 		close(wc.send)
-		_ = wc.conn.Close()
+		_ = wc.conn.Close() //nolint:errcheck
 		log.Printf("worker %s disconnected", wc.id)
 	}()
 
 	wc.conn.SetReadLimit(64 * 1024)
-	_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
 	wc.conn.SetPongHandler(func(string) error {
-		_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
 		return nil
 	})
 
@@ -179,7 +179,7 @@ func (wc *workerConn) readPump() {
 			}
 			return
 		}
-		_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
 
 		var ev models.TaskEvent
 		if err := json.Unmarshal(raw, &ev); err != nil {

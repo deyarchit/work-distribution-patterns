@@ -35,15 +35,15 @@ func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error) {
 
 	go func() {
 		for {
-			msg, err := eventsSub.Receive(ctx)
-			if err != nil {
-				log.Printf("p06 api: events subscription error: %v", err)
+			msg, recvErr := eventsSub.Receive(ctx)
+			if recvErr != nil {
+				log.Printf("p06 api: events subscription error: %v", recvErr)
 				return
 			}
 
 			var ev models.TaskEvent
-			if err := json.Unmarshal(msg.Body, &ev); err != nil {
-				log.Printf("p06 api: unmarshal event error: %v", err)
+			if unmarshalErr := json.Unmarshal(msg.Body, &ev); unmarshalErr != nil {
+				log.Printf("p06 api: unmarshal event error: %v", unmarshalErr)
 				msg.Ack()
 				continue
 			}
@@ -55,7 +55,7 @@ func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error) {
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
-		_ = eventsSub.Shutdown(ctx)
+		_ = eventsSub.Shutdown(ctx) //nolint:errcheck
 		return nil, err
 	}
 

@@ -42,7 +42,7 @@ func SubmitTask(manager contracts.TaskManager) echo.HandlerFunc {
 
 		// Return HTML fragment for HTMX requests; JSON for everything else.
 		if c.Request().Header.Get("HX-Request") == "true" {
-			tpl := c.Get("template").(*template.Template)
+			tpl := c.Get("template").(*template.Template) //nolint:errcheck
 			c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 			return tpl.ExecuteTemplate(c.Response().Writer, "task-card", task)
 		}
@@ -85,7 +85,7 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 		defer unsub()
 
 		// Send a comment to flush headers immediately
-		_, _ = fmt.Fprintf(c.Response().Writer, ": connected\n\n")
+		_, _ = fmt.Fprintf(c.Response().Writer, ": connected\n\n") //nolint:errcheck
 		c.Response().Flush()
 
 		ticker := time.NewTicker(15 * time.Second)
@@ -97,11 +97,11 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 			case <-ctx.Done():
 				return nil
 			case data := <-ch:
-				_, _ = fmt.Fprintf(c.Response().Writer, "data: %s\n\n", data)
+				_, _ = fmt.Fprintf(c.Response().Writer, "data: %s\n\n", data) //nolint:errcheck
 				c.Response().Flush()
 			case <-ticker.C:
 				// Heartbeat to keep connection alive
-				_, _ = fmt.Fprintf(c.Response().Writer, ": heartbeat\n\n")
+				_, _ = fmt.Fprintf(c.Response().Writer, ": heartbeat\n\n") //nolint:errcheck
 				c.Response().Flush()
 			}
 		}

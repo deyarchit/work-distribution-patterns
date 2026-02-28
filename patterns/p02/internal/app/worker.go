@@ -18,7 +18,9 @@ type WorkerConfig struct {
 // Blocks until ctx is cancelled.
 func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	consumer := restinternal.NewRESTConsumer(cfg.ManagerURL)
-	_ = consumer.Connect(ctx)
+	if err := consumer.Connect(ctx); err != nil {
+		return
+	}
 
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 

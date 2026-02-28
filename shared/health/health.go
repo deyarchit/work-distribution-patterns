@@ -14,7 +14,7 @@ const HealthResponse = "ok"
 func Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(HealthResponse))
+		_, _ = w.Write([]byte(HealthResponse)) //nolint:errcheck
 	}
 }
 

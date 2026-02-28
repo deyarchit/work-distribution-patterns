@@ -7,8 +7,8 @@ bin/
 *.test
 
 # Test artifacts
-cover.out
-cover.html
+coverage.txt
+coverage.html
 
 # Go workspace
 go.work

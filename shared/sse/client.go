@@ -49,7 +49,7 @@ func (c *Client) streamWithReconnect(ctx context.Context, out chan<- models.Task
 			return
 		}
 
-		_ = c.streamEvents(ctx, out)
+		_ = c.streamEvents(ctx, out) //nolint:errcheck
 		if ctx.Err() != nil {
 			return
 		}
@@ -78,7 +78,7 @@ func (c *Client) streamEvents(ctx context.Context, out chan<- models.TaskEvent) 
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("SSE endpoint returned %d", resp.StatusCode)

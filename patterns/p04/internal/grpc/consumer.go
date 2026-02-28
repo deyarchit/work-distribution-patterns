@@ -111,7 +111,7 @@ func (c *Consumer) receiveLoop(ctx context.Context) {
 			c.mu.Lock()
 			c.connected = false
 			c.mu.Unlock()
-			if err := c.Connect(ctx); err != nil {
+			if connectErr := c.Connect(ctx); connectErr != nil {
 				return
 			}
 			continue

@@ -22,7 +22,7 @@ func TestP6Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nats container: %v", err)
 	}
-	t.Cleanup(func() { _ = natsC.Terminate(context.Background()) })
+	t.Cleanup(func() { _ = natsC.Terminate(context.Background()) }) //nolint:errcheck
 	natsURL, err := natsC.ConnectionString(ctx)
 	if err != nil {
 		t.Fatalf("nats url: %v", err)
@@ -41,7 +41,7 @@ func TestP6Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postgres container: %v", err)
 	}
-	t.Cleanup(func() { _ = pgC.Terminate(context.Background()) })
+	t.Cleanup(func() { _ = pgC.Terminate(context.Background()) }) //nolint:errcheck
 	dbURL, err := pgC.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		t.Fatalf("postgres url: %v", err)
@@ -79,7 +79,7 @@ func startServer(t *testing.T, e *echo.Echo) string {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { _ = e.Shutdown(context.Background()) })
-	go func() { _ = e.Server.Serve(ln) }()
+	t.Cleanup(func() { _ = e.Shutdown(context.Background()) }) //nolint:errcheck
+	go func() { _ = e.Server.Serve(ln) }()                     //nolint:errcheck
 	return "http://" + ln.Addr().String()
 }

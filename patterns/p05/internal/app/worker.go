@@ -36,15 +36,15 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 		return
 	}
 
-	if err := natsinternal.SetupJetStream(js); err != nil {
-		// Non-fatal: streams may already exist.
-		_ = err
-	}
+	_ = natsinternal.SetupJetStream(js) //nolint:errcheck
 
 	consumer := natsinternal.NewNATSConsumer(nc, js)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
-	_ = consumer.Connect(ctx)
+	if err := consumer.Connect(ctx); err != nil {
+		log.Printf("p05 worker: connect: %v", err)
+		return
+	}
 
 	for {
 		task, err := consumer.Receive(ctx)

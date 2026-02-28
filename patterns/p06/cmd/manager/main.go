@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 
 	"github.com/kelseyhightower/envconfig"
@@ -16,9 +17,15 @@ type config struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	var cfg config
 	if err := envconfig.Process("", &cfg); err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -29,9 +36,9 @@ func main() {
 		DatabaseURL: cfg.DatabaseURL,
 	})
 	if err != nil {
-		log.Fatalf("setup: %v", err)
+		return fmt.Errorf("setup: %w", err)
 	}
 
 	log.Printf("Pattern 06 (Cloud-Agnostic) Manager listening on %s [broker=%s]", cfg.Addr, cfg.BrokerURL)
-	log.Fatal(e.Start(cfg.Addr))
+	return e.Start(cfg.Addr)
 }

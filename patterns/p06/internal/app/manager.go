@@ -45,10 +45,10 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 	}
 
 	dispatcher := pubsubinternal.NewPubSubDispatcher(tasksTopic, workerEventsSub)
-	if err := dispatcher.Start(ctx); err != nil {
+	if startErr := dispatcher.Start(ctx); startErr != nil {
 		dispatcher.Shutdown(ctx)
 		pool.Close()
-		return nil, err
+		return nil, startErr
 	}
 
 	eventBridge := pubsubinternal.NewPubSubEventBridge(apiEventsTopic)

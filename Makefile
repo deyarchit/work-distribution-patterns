@@ -53,8 +53,8 @@ stop-p6:
 
 ## Run in-process integration tests for all patterns (generates cover.out + cover.html)
 test:
-	go test ./patterns/... -timeout 300s -coverprofile=cover.out -coverpkg=./patterns/...,./shared/...
-	go tool cover -html=cover.out -o cover.html
+	go test ./patterns/... -timeout 300s -coverprofile=coverage.txt -coverpkg=./patterns/...,./shared/...
+	go tool cover -html=coverage.txt -o coverage.html
 
 ## Run E2E tests against BASE_URL (default http://localhost:8080)
 test-e2e:

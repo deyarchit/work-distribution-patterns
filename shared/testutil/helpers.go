@@ -65,7 +65,12 @@ func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan
 	if taskID != "" {
 		url += "?taskID=" + taskID
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Logf("SSE new request: %v", err)
+		close(ch)
+		return ch
+	}
 	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
 	if err != nil {
 		t.Logf("SSE connect error: %v", err)
@@ -74,13 +79,13 @@ func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Logf("SSE non-200: %d", resp.StatusCode)
-		_ = resp.Body.Close()
+		_ = resp.Body.Close() //nolint:errcheck
 		close(ch)
 		return ch
 	}
 
 	go func() {
-		defer func() { _ = resp.Body.Close() }()
+		defer func() { _ = resp.Body.Close() }() //nolint:errcheck //nolint:errcheck
 		defer close(ch)
 
 		scanner := bufio.NewScanner(resp.Body)
@@ -108,15 +113,18 @@ func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan
 // PostTask submits a task and returns its ID.
 func PostTask(t *testing.T, baseURL, name string, stageCount int) string {
 	t.Helper()
-	body, _ := json.Marshal(SubmitRequest{
+	body, err := json.Marshal(SubmitRequest{
 		Name:       name,
 		StageCount: stageCount,
 	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
 	resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatalf("POST /tasks: %v", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
@@ -134,7 +142,7 @@ func ListTasks(t *testing.T, baseURL string) []TaskResponse {
 	if err != nil {
 		t.Fatalf("GET /tasks: %v", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /tasks: expected 200, got %d", resp.StatusCode)
 	}
@@ -152,7 +160,7 @@ func GetTask(t *testing.T, baseURL, id string) TaskResponse {
 	if err != nil {
 		t.Fatalf("GET /tasks/%s: %v", id, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 	var tr TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
 		t.Fatalf("decode task: %v", err)
@@ -167,7 +175,7 @@ func DoGet(url string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	_ = resp.Body.Close()
+	_ = resp.Body.Close() //nolint:errcheck
 	return resp.StatusCode, nil
 }
 
@@ -193,15 +201,18 @@ func WaitForWorker(t *testing.T, baseURL string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		body, _ := json.Marshal(SubmitRequest{Name: "probe", StageCount: 1})
+		body, marshalErr := json.Marshal(SubmitRequest{Name: "probe", StageCount: 1})
+		if marshalErr != nil {
+			t.Fatalf("marshal probe: %v", marshalErr)
+		}
 		resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body))) //nolint:noctx
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 		var sr SubmitResponse
-		_ = json.NewDecoder(resp.Body).Decode(&sr)
-		_ = resp.Body.Close()
+		_ = json.NewDecoder(resp.Body).Decode(&sr) //nolint:errcheck
+		_ = resp.Body.Close()                      //nolint:errcheck
 		if resp.StatusCode == http.StatusAccepted {
 			// Wait for the probe task to complete so the worker is free before the suite starts.
 			waitForTaskCompletion(baseURL, sr.ID, 10*time.Second)
@@ -223,10 +234,10 @@ func waitForTaskCompletion(baseURL, taskID string, timeout time.Duration) {
 		if err == nil {
 			var tr TaskResponse
 			if json.NewDecoder(resp.Body).Decode(&tr) == nil && (tr.Status == "completed" || tr.Status == "failed") {
-				_ = resp.Body.Close()
+				_ = resp.Body.Close() //nolint:errcheck
 				return
 			}
-			_ = resp.Body.Close()
+			_ = resp.Body.Close() //nolint:errcheck
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
