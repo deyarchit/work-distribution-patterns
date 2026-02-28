@@ -13,9 +13,15 @@ import (
 	_ "gocloud.dev/pubsub/kafkapubsub" // Register kafka:// scheme
 )
 
+// ManagerResources holds the Go Cloud PubSub resources required by the manager.
+type ManagerResources struct {
+	TasksTopic      *pubsub.Topic
+	WorkerEventsSub *pubsub.Subscription
+	APIEventsTopic  *pubsub.Topic
+}
+
 // OpenManagerResources initializes Go Cloud resources for the manager.
-// Returns: tasksTopic (for dispatching), eventsSub (from workers), eventsTopic (to APIs)
-func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic, *pubsub.Subscription, *pubsub.Topic, error) {
+func OpenManagerResources(ctx context.Context, brokerURL string) (ManagerResources, error) {
 	scheme := strings.Split(brokerURL, "://")[0]
 
 	var tasksTopicURL, eventsSubURL, apiEventsTopicURL string
@@ -56,25 +62,29 @@ func OpenManagerResources(ctx context.Context, brokerURL string) (*pubsub.Topic,
 		apiEventsTopicURL = fmt.Sprintf("awssns:///%s?region=%s&endpoint=%s", topicARN, region, endpoint)
 
 	default:
-		return nil, nil, nil, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka, awssqs)", scheme)
+		return ManagerResources{}, fmt.Errorf("unsupported broker scheme: %s (supported: nats, kafka, awssqs)", scheme)
 	}
 
 	tasksTopic, err := pubsub.OpenTopic(ctx, tasksTopicURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return ManagerResources{}, err
 	}
 
 	eventsSub, err := pubsub.OpenSubscription(ctx, eventsSubURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return ManagerResources{}, err
 	}
 
 	apiEventsTopic, err := pubsub.OpenTopic(ctx, apiEventsTopicURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return ManagerResources{}, err
 	}
 
-	return tasksTopic, eventsSub, apiEventsTopic, nil
+	return ManagerResources{
+		TasksTopic:      tasksTopic,
+		WorkerEventsSub: eventsSub,
+		APIEventsTopic:  apiEventsTopic,
+	}, nil
 }
 
 // OpenWorkerResources initializes Go Cloud resources for workers.

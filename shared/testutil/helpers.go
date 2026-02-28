@@ -79,13 +79,13 @@ func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Logf("SSE non-200: %d", resp.StatusCode)
-		_ = resp.Body.Close() //nolint:errcheck
+		_ = resp.Body.Close()
 		close(ch)
 		return ch
 	}
 
 	go func() {
-		defer func() { _ = resp.Body.Close() }() //nolint:errcheck //nolint:errcheck
+		defer func() { _ = resp.Body.Close() }()
 		defer close(ch)
 
 		scanner := bufio.NewScanner(resp.Body)
@@ -124,7 +124,7 @@ func PostTask(t *testing.T, baseURL, name string, stageCount int) string {
 	if err != nil {
 		t.Fatalf("POST /tasks: %v", err)
 	}
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
@@ -142,7 +142,7 @@ func ListTasks(t *testing.T, baseURL string) []TaskResponse {
 	if err != nil {
 		t.Fatalf("GET /tasks: %v", err)
 	}
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /tasks: expected 200, got %d", resp.StatusCode)
 	}
@@ -160,7 +160,7 @@ func GetTask(t *testing.T, baseURL, id string) TaskResponse {
 	if err != nil {
 		t.Fatalf("GET /tasks/%s: %v", id, err)
 	}
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 	var tr TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
 		t.Fatalf("decode task: %v", err)
@@ -171,11 +171,11 @@ func GetTask(t *testing.T, baseURL, id string) TaskResponse {
 // DoGet performs a GET request and returns the HTTP status code.
 // Returns (0, err) on connection failure.
 func DoGet(url string) (int, error) {
-	resp, err := http.Get(url) //nolint:noctx
+	resp, err := http.Get(url)
 	if err != nil {
 		return 0, err
 	}
-	_ = resp.Body.Close() //nolint:errcheck
+	_ = resp.Body.Close()
 	return resp.StatusCode, nil
 }
 
@@ -205,14 +205,14 @@ func WaitForWorker(t *testing.T, baseURL string) {
 		if marshalErr != nil {
 			t.Fatalf("marshal probe: %v", marshalErr)
 		}
-		resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body))) //nolint:noctx
+		resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body)))
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 		var sr SubmitResponse
-		_ = json.NewDecoder(resp.Body).Decode(&sr) //nolint:errcheck
-		_ = resp.Body.Close()                      //nolint:errcheck
+		_ = json.NewDecoder(resp.Body).Decode(&sr)
+		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusAccepted {
 			// Wait for the probe task to complete so the worker is free before the suite starts.
 			waitForTaskCompletion(baseURL, sr.ID, 10*time.Second)
@@ -230,17 +230,53 @@ func waitForTaskCompletion(baseURL, taskID string, timeout time.Duration) {
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(fmt.Sprintf("%s/tasks/%s", baseURL, taskID)) //nolint:noctx
+		resp, err := http.Get(fmt.Sprintf("%s/tasks/%s", baseURL, taskID))
 		if err == nil {
 			var tr TaskResponse
 			if json.NewDecoder(resp.Body).Decode(&tr) == nil && (tr.Status == "completed" || tr.Status == "failed") {
-				_ = resp.Body.Close() //nolint:errcheck
+				_ = resp.Body.Close()
 				return
 			}
-			_ = resp.Body.Close() //nolint:errcheck
+			_ = resp.Body.Close()
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// drainAndReset stops timer, drains any pending tick, then resets it to d.
+func drainAndReset(timer *time.Timer, d time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(d)
+}
+
+// processEvent records a single SSE event into result, checks for duplicates,
+// and logs the event via t.
+func processEvent(t *testing.T, result *CollectedEvents, seenEvents map[string]bool, ev SSEEvent) {
+	t.Helper()
+	eventSig := fmt.Sprintf("%s:%s:%s:%d:%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
+	if seenEvents[eventSig] {
+		t.Errorf("DUPLICATE event detected: %s", eventSig)
+	}
+	seenEvents[eventSig] = true
+
+	result.EventCounts[ev.Type]++
+	if result.PerTask[ev.TaskID] == nil {
+		result.PerTask[ev.TaskID] = make(map[string]int)
+	}
+	result.PerTask[ev.TaskID][ev.Type]++
+
+	if ev.Type == "task_status" {
+		result.StatusSeq = append(result.StatusSeq, ev.Status)
+		if ev.Status == "completed" {
+			result.SeenCompleted = true
+		}
+	}
+	t.Logf("event: task=%s type=%s status=%s progress=%d stage=%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
 }
 
 // CollectEventsUntilQuiet collects events from the SSE channel for the specified task IDs
@@ -276,36 +312,8 @@ func CollectEventsUntilQuiet(ctx context.Context, t *testing.T, events <-chan SS
 			if !idSet[ev.TaskID] {
 				continue
 			}
-
-			if !quiescenceTimer.Stop() {
-				select {
-				case <-quiescenceTimer.C:
-				default:
-				}
-			}
-			quiescenceTimer.Reset(quietDuration)
-
-			eventSig := fmt.Sprintf("%s:%s:%s:%d:%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
-			if seenEvents[eventSig] {
-				t.Errorf("DUPLICATE event detected: %s", eventSig)
-			}
-			seenEvents[eventSig] = true
-
-			result.EventCounts[ev.Type]++
-
-			if result.PerTask[ev.TaskID] == nil {
-				result.PerTask[ev.TaskID] = make(map[string]int)
-			}
-			result.PerTask[ev.TaskID][ev.Type]++
-
-			if ev.Type == "task_status" {
-				result.StatusSeq = append(result.StatusSeq, ev.Status)
-				if ev.Status == "completed" {
-					result.SeenCompleted = true
-				}
-			}
-
-			t.Logf("event: task=%s type=%s status=%s progress=%d stage=%s", ev.TaskID, ev.Type, ev.Status, ev.Progress, ev.StageName)
+			drainAndReset(quiescenceTimer, quietDuration)
+			processEvent(t, &result, seenEvents, ev)
 		}
 	}
 }

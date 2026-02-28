@@ -58,7 +58,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 
 	e := echo.New()
 	e.HideBanner = true
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
 		Skipper: func(c echo.Context) bool {
 			return c.Request().URL.Path == "/health"
 		},

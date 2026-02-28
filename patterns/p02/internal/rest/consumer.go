@@ -50,7 +50,7 @@ func (c *RESTConsumer) Receive(ctx context.Context) (models.Task, error) {
 
 		switch resp.StatusCode {
 		case http.StatusNoContent:
-			_ = resp.Body.Close() //nolint:errcheck
+			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():
 				return models.Task{}, ctx.Err()
@@ -60,7 +60,7 @@ func (c *RESTConsumer) Receive(ctx context.Context) (models.Task, error) {
 		case http.StatusOK:
 			var task models.Task
 			decErr := json.NewDecoder(resp.Body).Decode(&task)
-			_ = resp.Body.Close() //nolint:errcheck
+			_ = resp.Body.Close()
 			if decErr != nil {
 				select {
 				case <-ctx.Done():
@@ -72,7 +72,7 @@ func (c *RESTConsumer) Receive(ctx context.Context) (models.Task, error) {
 			return task, nil
 
 		default:
-			_ = resp.Body.Close() //nolint:errcheck
+			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():
 				return models.Task{}, ctx.Err()
@@ -100,6 +100,6 @@ func (c *RESTConsumer) Emit(ctx context.Context, event models.TaskEvent) error {
 	if err != nil {
 		return err
 	}
-	_ = resp.Body.Close() //nolint:errcheck
+	_ = resp.Body.Close()
 	return nil
 }

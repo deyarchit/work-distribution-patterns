@@ -36,7 +36,7 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 		return
 	}
 
-	_ = natsinternal.SetupJetStream(js) //nolint:errcheck
+	_ = natsinternal.SetupJetStream(js)
 
 	consumer := natsinternal.NewNATSConsumer(nc, js)
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}

@@ -38,20 +38,20 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 		return nil, err
 	}
 
-	tasksTopic, workerEventsSub, apiEventsTopic, err := pubsubinternal.OpenManagerResources(ctx, cfg.BrokerURL)
+	res, err := pubsubinternal.OpenManagerResources(ctx, cfg.BrokerURL)
 	if err != nil {
 		pool.Close()
 		return nil, err
 	}
 
-	dispatcher := pubsubinternal.NewPubSubDispatcher(tasksTopic, workerEventsSub)
+	dispatcher := pubsubinternal.NewPubSubDispatcher(res.TasksTopic, res.WorkerEventsSub)
 	if startErr := dispatcher.Start(ctx); startErr != nil {
 		dispatcher.Shutdown(ctx)
 		pool.Close()
 		return nil, startErr
 	}
 
-	eventBridge := pubsubinternal.NewPubSubEventBridge(apiEventsTopic)
+	eventBridge := pubsubinternal.NewPubSubEventBridge(res.APIEventsTopic)
 	mgr := manager.New(taskStore, dispatcher, eventBridge, 30*time.Second)
 	mgr.Start(ctx)
 
@@ -64,7 +64,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 
 	e := echo.New()
 	e.HideBanner = true
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{ //nolint:staticcheck // deprecated but still functional; sufficient for demo
 		Skipper: func(c echo.Context) bool {
 			return c.Request().URL.Path == "/health"
 		},

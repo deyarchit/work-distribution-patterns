@@ -154,6 +154,7 @@ tidy:
 
 ## Lint with golangci-lint
 lint:
+	golangci-lint config verify
 	golangci-lint run ./...
 
 ## Format with golangci-lint (auto-fix formatting)
