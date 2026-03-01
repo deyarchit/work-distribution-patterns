@@ -9,12 +9,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Task type | Codemap(s) to load |
 |---|---|
 | Understanding overall system design, how patterns differ, or data flow | `docs/CODEMAPS/architecture.md` |
-| Deep dive into architectural decisions and trade-offs | `docs/CODEMAPS/rationale.md` |
+| Deep dive into architectural decisions and trade-offs | `docs/CODEMAPS/architecture.md` + `docs/CODEMAPS/dependencies.md` |
 | Working on Go backend code: packages, types, interfaces, dispatch, executor | `docs/CODEMAPS/backend.md` |
 | Working on UI, SSE streaming, or HTMX templates | `docs/CODEMAPS/frontend.md` |
 | Adding or auditing external libraries | `docs/CODEMAPS/dependencies.md` |
 | Adding a new pattern | `docs/CODEMAPS/architecture.md` + `docs/CODEMAPS/backend.md` |
-| Debugging a full request path (API → dispatch → SSE) | all four codemaps |
+| Writing or debugging tests, understanding test helpers or infra | `docs/CODEMAPS/testing.md` |
+| Debugging a full request path (API → dispatch → SSE) | all five codemaps |
 
 Use `tree .` for the full nested file structure when needed.
 

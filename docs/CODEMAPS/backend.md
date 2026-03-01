@@ -1,47 +1,36 @@
-<!-- Commit: 5154530 | Files scanned: 75 | Token estimate: ~1200 -->
-
 # Backend Codemap
 
 ## Package Roles
 
-| Package | Path | Role |
-|---------|------|------|
-| `shared/api` | `handlers.go`, `server.go` | HTTP routes (`/tasks`, `/events`, `/health`), HTMX handlers |
-| `shared/contracts` | `manager.go`, `dispatcher.go`, `consumer.go` | `TaskManager`, `TaskDispatcher`, `TaskConsumer` interfaces + sentinel errors |
-| `shared/manager` | `manager.go` | Unified `Manager`: task lifecycle, deadline loop, single `runEventLoop` conditionally routes worker events to event bus (true for MemoryEventBus, false for NATS) |
-| `shared/executor` | `executor.go` | Stage runner; emits all events (running/progress/terminal) via `contracts.TaskConsumer`; returns nothing |
-| `shared/models` | `task.go` | `Task`, `Stage`, `TaskEvent`, `TaskStatus`, event-type constants |
-| `shared/events` | `events.go`, `memory.go`, `nats.go` | `TaskEventBridge` interface (split into Publisher/Subscriber); `MemoryBridge` (P1–P4), `NATSBridge` (P5) |
-| `shared/sse` | `hub.go`, `client.go` | `Hub`: SSE fan-out; `Client`: SSE subscriber (used by P2/P3 APIs) |
-| `shared/store` | `store.go`, `memory.go` | `TaskStore` interface + `MemoryStore` |
-| `shared/templates` | `embed.go`, `index.html` | Embedded HTMX template |
-| `shared/testutil` | `helpers.go`, `suite.go` | `SSEClient`, `PostTask`, `ListTasks`, `GetTask`, `WaitReady`, `WaitForWorker` helpers; `RunSuite` integration test runner with `SingleTask`, `ConcurrentTasks`, `StatusTransitions` subtests |
-| `shared/client` (pkg `client`) | `manager.go` | `RemoteTaskManager`: implements `contracts.TaskManager` by proxying Submit/Get/List over HTTP. Used by P2, P3, P5, P6 APIs. |
-| `p0N/internal/app` | `app.go` (or `api.go`, `manager.go`, `worker.go` split) | Wiring functions: `NewManager`, `NewAPI`, `RunWorker` per pattern. Single entry point for `cmd/api`, `cmd/manager`, `cmd/worker` mains. |
-| `p01/internal/goroutine` | `dispatcher.go`, `consumer.go` | `ChannelDispatcher`+`ChannelConsumer` (single shared `events chan TaskEvent`); constructed together by `New` |
-| `p01/internal/worker` | `worker.go` | `RunWorker`: `Receive` → `exec.Run(ctx, task, consumer)` loop |
-| `p02/internal/rest` (pkg `rest`) | `dispatcher.go`, `consumer.go` | `RESTDispatcher` (TaskDispatcher): buffered chan + HTTP handlers `/work/next`, `/work/events`; `RESTConsumer` (TaskConsumer): polling loop |
-| `p03/internal/websocket` (pkg `wsinternal`) | `dispatcher.go`, `consumer.go` | `WebSocketDispatcher` (TaskDispatcher): manages worker conns, readPump/writePump, single `events` chan; `WebSocketConsumer` (TaskConsumer): reconnect loop, `currentSend` indirection |
-| `p04/internal/grpc` (pkg `grpc`) | `client.go`, `server.go`, `dispatcher.go`, `consumer.go`, `converter.go` | `gRPCDispatcher` (TaskDispatcher): bidirectional stream management; `gRPCConsumer` (TaskConsumer): gRPC client; protobuf types in `proto/work.proto` |
-| `p04/proto` | `work.proto`, `work.pb.go`, `work_grpc.pb.go` | Protocol buffer definitions for gRPC messages; auto-generated bindings |
-| `p05/internal/nats` (pkg `natsinternal`) | `dispatcher.go`, `consumer.go`, `setup.go` | `NATSDispatcher`, `NATSConsumer`, JetStream stream setup |
-| `p05/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore`; schema auto-created on startup via `New(ctx, pool)` |
-| `p06/internal/pubsub` (pkg `pubsubinternal`) | `dispatcher.go`, `consumer.go`, `bridge.go`, `setup.go`, `aws.go` | `CloudDispatcher`, `CloudConsumer`, `CloudBridge`; gocloud.dev/pubsub abstraction; broker-agnostic setup for NATS/Kafka/AWS; `openAWSAPISubscription` dynamically creates SQS queues for APIs |
-| `p06/internal/postgres` (pkg `pgstore`) | `store.go` | `Store`: PostgreSQL-backed `TaskStore` (same as P5) |
+| Package | Role |
+|---------|------|
+| `shared/api` | HTTP routes, HTMX handlers |
+| `shared/contracts` | Interface definitions: `TaskManager`, `TaskDispatcher`, `TaskConsumer`; sentinel errors |
+| `shared/manager` | Task lifecycle, deadline loop, event bus routing |
+| `shared/executor` | Stage runner; emits events via `TaskConsumer` |
+| `shared/models` | `Task`, `Stage`, `TaskEvent`, `TaskStatus` types |
+| `shared/events` | `TaskEventBridge` + implementations: `MemoryBridge` (P1–P4), `NATSBridge` (P5) |
+| `shared/sse` | SSE `Hub` (server), `Client` (subscriber) |
+| `shared/store` | `TaskStore` interface + `MemoryStore` |
+| `shared/templates` | Embedded HTMX template |
+| `shared/testutil` | Test helpers (`PostTask`, `ListTasks`, etc.); `RunSuite` integration runner |
+| `shared/client` | `RemoteTaskManager`: HTTP proxy to manager (P2–P6 APIs) |
+| `p0N/internal/app` | Wiring: `NewManager`, `NewAPI`, `RunWorker` per pattern |
+| P1–P6 `internal/*` | Pattern-specific `TaskDispatcher`/`TaskConsumer` implementations |
 
-## API Routes (`shared/api`)
+## API Routes
 
-| Method | Path | Handler |
-|--------|------|---------|
-| POST | `/tasks` | `SubmitTask` — creates task via `models.NewTask`, delegates to `TaskManager.Submit` |
-| GET | `/tasks` | `ListTasks(manager)` — proxies to `TaskManager.List(ctx)` |
-| GET | `/tasks/:id` | `GetTask(manager)` — proxies to `TaskManager.Get(ctx, id)` |
-| GET | `/events` | `SSEStream` — subscribes to `sse.Hub` (`?taskID=` for scoped; empty = global) |
-| GET | `/health` | `Health` — returns `200 ok`; excluded from Echo request logs via skipper |
-| GET | `/` | `Index` — serves HTMX page |
-| GET | `/ws/register` | Pattern 3 only — worker WebSocket registration |
-| GET | `/work/next` | Pattern 2 manager only — worker polls for next task |
-| POST | `/work/events` | Pattern 2 manager only — worker posts progress/status events |
+| Method | Path | Handler | Notes |
+|--------|------|---------|-------|
+| POST | `/tasks` | `SubmitTask` | Creates task, delegates to `TaskManager.Submit` |
+| GET | `/tasks` | `ListTasks` | Proxies to `TaskManager.List` |
+| GET | `/tasks/:id` | `GetTask` | Proxies to `TaskManager.Get` |
+| GET | `/events` | `SSEStream` | Subscribes to SSE hub (`?taskID=` scoped; empty = global) |
+| GET | `/health` | `Health` | Returns `200 ok`; logs skipped |
+| GET | `/` | `Index` | Serves HTMX page |
+| GET | `/ws/register` | P3 manager only — worker WebSocket registration |
+| GET | `/work/next` | P2 manager only — worker polls for next task |
+| POST | `/work/events` | P2 manager only — worker posts events |
 
 ## Key Type Signatures
 
@@ -88,19 +77,8 @@ func (m *Manager) List(_ context.Context) []models.Task
 func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)  // SSE streaming with auto-reconnect
 ```
 
-## Pattern-Specific Notes
+## Detailed References
 
-**Pattern 1** — `ChannelDispatcher`+`ChannelConsumer` share a single `events chan TaskEvent` (created together by `New`). Directional channel types enforce ownership at compile time. `RunWorker` loops: `Receive` → `exec.Run(ctx, task, consumer)`; executor handles all event emission. Manager republishes events to MemoryBridge. Deadline disabled (`deadline=0`). Wiring: `p01/internal/app/app.go`. Integration test: `p01/integration_test.go` (single-process, no testcontainers needed).
-
-**Pattern 2** — Three separate processes: API, Manager, Worker. `shared/client.RemoteTaskManager` (API-side) proxies `Submit/Get/List` over HTTP. Manager creates `MemoryBridge` and pumps it to SSE hub; API subscribes via `sse.Client`. Manager builds its Echo router manually (custom `POST /tasks` handler accepts full `models.Task` — API pre-creates the task with `models.NewTask`). `RESTDispatcher.HandleNext` (GET /work/next) does a non-blocking channel pop; workers poll at 500 ms idle / 2 s error backoff. Manager republishes events to MemoryBridge. Deadline disabled. Wiring: `p02/internal/app/{api,manager,worker}.go`. Integration test: `p02/integration_test.go` (uses testcontainers).
-
-**Pattern 3** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `WebSocketDispatcher`, `MemoryBridge`, and MemoryStore. Manager pumps `MemoryBridge` to SSE hub; API subscribes via `sse.Client`. `WebSocketDispatcher.Dispatch` round-robins to idle `workerConn`; returns `ErrNoWorkers` if none. `WebSocketConsumer` uses `currentSend chan []byte` guarded by mutex; reconnect goroutine sets/clears it. Worker process calls `exec.Run` in a goroutine per task. Manager republishes events to MemoryBridge. Deadline disabled. Wiring: `p03/internal/app/{api,manager,worker}.go`. Integration test: `p03/integration_test.go` (testcontainers + 3 worker processes; `WaitForWorker` critical for validating busy flag).
-
-**Pattern 4** — Three separate processes: API (:8080), Manager (:8081), Worker. API uses `shared/client.RemoteTaskManager`; Manager owns `gRPCDispatcher`, `MemoryBridge`, and MemoryStore. Manager pumps `MemoryBridge` to SSE hub; API subscribes via `sse.Client`. `gRPCDispatcher.Start` listens for gRPC connections on configured address; `Dispatch` sends tasks over established streams. `gRPCConsumer` maintains persistent bidirectional stream with manager, emits events as gRPC messages. Manager republishes events to MemoryBridge. Deadline disabled. Uses protobuf-generated code from `work.proto`. Wiring: `p04/internal/app/{api,manager,worker}.go`. Integration test: `p04/integration_test.go` (testcontainers; manager returns dual listeners for HTTP + gRPC).
-
-**Pattern 5** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). API uses `shared/client.RemoteTaskManager` — thin proxy only, no NATS/postgres. Manager owns NATS, postgres, SSE hub. `NATSDispatcher.Start` NATS Core-subscribes to `task.events.*`; `NATSConsumer.Emit` publishes to `task.events.<taskID>`. `NATSConsumer.Connect` queue-subscribes to `tasks.new` JetStream with manual ACK. Synchronous worker loop (one task at a time). Manager always republishes events to `NATSBridge` after processing worker events. Deadline 30 s. Store is `pgstore.Store` backed by PostgreSQL (`pgxpool`); schema (`tasks` table with JSONB `stages`) is created idempotently on startup. Wiring: `p05/internal/app/{api,manager,worker}.go`. Integration test: `p05/integration_test.go` (testcontainers: NATS via `tcnats.Run`, Postgres via `tcpostgres.Run`).
-
-**Pattern 6** — Three separate process types: API (:8080, ×3 replicas), Manager (:8081, ×1), Worker (×3). Uses `gocloud.dev/pubsub` abstraction with pluggable brokers (NATS JetStream, Kafka, AWS SNS/SQS). API uses `shared/client.RemoteTaskManager` + `CloudBridge` to subscribe to broker-specific event stream. Manager owns `CloudDispatcher`, `CloudBridge`, postgres.
-  - **NATS/Kafka**: Two JetStream streams or Kafka topics: TASKS (WorkQueue/queue retention, persistent) and EVENTS (Interest/high-throughput, ephemeral). Durable consumers: manager (`manager-events`), workers (`workers` shared), APIs (ephemeral per instance).
-  - **AWS**: Manager publishes tasks to SQS queue (`worker-tasks`), APIs dynamically create SQS queues subscribed to SNS topic (`api-events`) for fanout; workers consume shared SQS queue (load-balanced). Uses AWS SDK v2 + LocalStack for local testing.
-  - Manager re-dispatches at 30 s deadline. Store: `pgstore.Store` (PostgreSQL). Wiring: `p06/internal/app/{api,manager,worker}.go`. Integration test: `p06/integration_test.go` (testcontainers: NATS + Postgres; pluggable broker selection via `BROKER` env).
+| File | Load when… |
+|------|-----------|
+| [details/backend-patterns.md](./details/backend-patterns.md) | Working on a specific pattern (P1–P6) wiring, transport implementation, or pattern-specific configuration |
