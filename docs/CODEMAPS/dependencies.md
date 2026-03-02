@@ -1,5 +1,3 @@
-<!-- Commit: 5154530 | Files scanned: 28 | Token estimate: ~1050 -->
-
 # Dependencies & Configuration
 
 ## Go Dependencies (`go.mod`)
@@ -21,7 +19,7 @@
 | `github.com/aws/aws-sdk-go-v2/service/sns` | v1.39+ | AWS SNS client (Pattern 6 AWS) |
 | `github.com/aws/aws-sdk-go-v2/service/sqs` | v1.42+ | AWS SQS client (Pattern 6 AWS) |
 | `github.com/testcontainers/testcontainers-go` | v0.x | Container orchestration for tests (integration tests) |
-| `github.com/testcontainers/testcontainers-go/modules/nats` | v0.x | NATS test container (P5/P6 integration tests) |
+| `github.com/testcontainers/testcontainers-go/modules/nats` | v0.x | NATS test container (P5/P6 integration tests) — ⚠ do not pass `WithArgument("-js","")`: JetStream is already on by default in this module and adding it causes conflicts |
 | `github.com/testcontainers/testcontainers-go/modules/postgres` | v0.x | PostgreSQL test container (P5/P6 integration tests) |
 
 ## Environment Variables
@@ -48,67 +46,16 @@ All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `d
 
 ## Container Topology
 
-### Pattern 1 — Single process (no Docker required)
-```
-[server binary]   ← patterns/p01/Dockerfile (single-stage)
-make run-p1       ← runs locally without Docker
-```
+| Pattern | Services | Notes |
+|---------|----------|-------|
+| P1 | `[server]` (binary) | Single process; `make run-p1` local (no Docker) |
+| P2 | `[api]`, `[manager]`, `[worker×3]` | HTTP polling; `depends_on manager` |
+| P3 | `[api]`, `[manager]`, `[worker×3]` | WebSocket push; manager owns hub |
+| P4 | `[api]`, `[manager]` (HTTP + gRPC), `[worker×3]` | gRPC bidirectional streams |
+| P5 | `[nginx]` → `[api×3]`, `[manager]`, `[worker×3]`, `[nats]`, `[postgres]` | Queue-and-store; APIs thin proxies; ⚠ nats.conf required (JetStream persistence) |
+| P6 | `[nginx]` → `[api×3]`, `[manager]`, `[worker×3]`, `[broker]`, `[postgres]` | Broker-agnostic via gocloud; `BROKER=nats\|kafka\|aws` |
 
-### Pattern 2 — Docker Compose (`patterns/p02`)
-```
-[manager ×1]   ← patterns/p02/Dockerfile.manager  (port 8081, healthcheck /health)
-[api ×1]       ← patterns/p02/Dockerfile.api      (port 8080, depends_on manager healthy)
-[worker ×3]    ← patterns/p02/Dockerfile.worker   (depends_on manager healthy)
-```
-Workers and API talk to manager via `http://manager:8081`.
-
-### Pattern 3 — Docker Compose (`patterns/p03`)
-```
-[manager ×1]   ← patterns/p03/Dockerfile.manager  (port 8081, healthcheck /health; owns WebSocket hub + MemoryStore)
-[api ×1]       ← patterns/p03/Dockerfile.api      (port 8080, depends_on manager healthy; MANAGER_URL=http://manager:8081)
-[worker ×3]    ← patterns/p03/Dockerfile.worker   (MANAGER_URL=ws://manager:8081/ws/register)
-```
-Workers connect to Manager (not API) via WebSocket.
-
-### Pattern 4 — Docker Compose (`patterns/p04`)
-```
-[manager ×1]   ← patterns/p04/Dockerfile.manager  (port 8081 HTTP, port 9090 gRPC; healthcheck /health; owns gRPC hub + MemoryStore)
-[api ×1]       ← patterns/p04/Dockerfile.api      (port 8080, depends_on manager healthy; MANAGER_URL=http://manager:8081)
-[worker ×3]    ← patterns/p04/Dockerfile.worker   (MANAGER_URL=http://manager:8081 for gRPC dial)
-```
-Workers connect to Manager via gRPC bidirectional streams.
-
-### Pattern 5 — Docker Compose (`patterns/p05`)
-```
-[nginx]        ← patterns/p05/nginx/nginx.conf   (port 8080 → upstream api)
-  ├─ [api ×3] ← patterns/p05/Dockerfile.api     (MANAGER_URL=http://manager:8081, NATS_URL=nats://nats:4222, depends_on manager healthy)
-[manager ×1]   ← patterns/p05/Dockerfile.manager  (port 8081; NATS_URL, DATABASE_URL; owns NATSBridge, postgres, SSE hub)
-[worker ×3]    ← patterns/p05/Dockerfile.worker
-[nats]         ← nats:latest + patterns/p05/nats.conf (max_file_store: 1GB, store_dir: /data/jetstream)
-               ← named volume: nats-jetstream (persistent across restarts)
-[postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
-```
-No sticky sessions: API replicas subscribe directly to NATS `task.events.*` for distributed event streaming.
-Manager uses `NATSBridge` to publish events; `pgstore.Store` (PostgreSQL) is the shared persistent store; schema created on startup.
-**Note:** `nats.conf` is required — NATS 2.12+ defaults `Max Storage: 0 B` without explicit config.
-
-### Pattern 6 — Docker Compose (`patterns/p06`)
-```
-[nginx]        ← patterns/p06/nginx/nginx.conf   (port 8080 → upstream api)
-  ├─ [api ×3] ← patterns/p06/Dockerfile.api     (MANAGER_URL=http://manager:8081, BROKER_URL=..., depends_on manager healthy)
-[manager ×1]   ← patterns/p06/Dockerfile.manager  (port 8081; BROKER_URL, DATABASE_URL; owns CloudDispatcher, postgres, SSE hub)
-[worker ×3]    ← patterns/p06/Dockerfile.worker   (BROKER_URL, MAX_STAGE_DURATION)
-[broker]       ← NATS (default), Kafka, or LocalStack (for AWS) — configurable via BROKER variable
-               ← docker-compose.base.yml + docker-compose.{nats,kafka,aws}.yml
-               ← Named volume: nats-jetstream (NATS only; persistent across restarts)
-[postgres]     ← postgres:17-alpine; NO named volume → ephemeral, wiped on `docker compose down`
-```
-
-**Broker Selection:** `make run-p6 BROKER=nats` (default), `make run-p6 BROKER=kafka`, or `make run-p6 BROKER=aws`.
-- **NATS:** gocloud `natspubsub` driver; two JetStream streams (TASKS: WorkQueue, EVENTS: Interest); durable consumers (manager, workers)
-- **Kafka:** gocloud `kafkapubsub` driver; topics for tasks and events; consumer groups for load balancing
-- **AWS:** gocloud `awssnssqs` driver + LocalStack; Manager publishes tasks to SQS queue, APIs dynamically create SQS queues subscribed to SNS topic for fanout
-- API replicas subscribe directly; no sticky sessions. Manager owns all connections and state.
+P5/P6 use persistent volumes (nats-jetstream for NATS; postgres always ephemeral).
 
 ## Build Targets
 

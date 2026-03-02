@@ -1,5 +1,3 @@
-<!-- Commit: 9d2e9ebb8ac2895ba48208a39da72b1b4d012efd | Files scanned: 2 | Token estimate: ~350 -->
-
 # Frontend Codemap
 
 ## Stack
@@ -27,17 +25,12 @@
 
 ## SSE Event Flow
 
-```
-GET /events?taskID=<id>  ─► per-task EventSource (stored in taskConnections Map)
+`GET /events?taskID=<id>` → per-task `EventSource` (stored in `taskConnections` Map)
 
-  data: {"type":"stage_progress", taskID, stageIdx, stageName, progress, status}
-       → handleStageProgress() → .stage-dot class, .stage-progress-fill width, .stage-pct text
-                               → updateOverallProgress() (average of all stage fills)
-
-  data: {"type":"task_status", taskID, status}
-       → handleTaskStatus() → .task-card class + .badge text/class
-                            → closeTaskSSE(taskID) on terminal status
-```
+| Event type | Payload fields | Handler | DOM effect |
+|------------|---------------|---------|------------|
+| `stage_progress` | taskID, stageIdx, stageName, progress, status | `handleStageProgress()` | `.stage-dot` class, `.stage-progress-fill` width, `.stage-pct` text; `updateOverallProgress()` |
+| `task_status` | taskID, status | `handleTaskStatus()` | `.task-card` class + `.badge` text/class; `closeTaskSSE(taskID)` on terminal status |
 
 - One `EventSource` per active task; closed on `completed` or `failed`
 - `syncCardState(taskID)` fetches `GET /tasks/:id` on card insertion to catch missed events
