@@ -4,18 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Exploring the Project
 
-**CRITICAL:** Codemaps in `docs/CODEMAPS/` are the authoritative, token-efficient source of truth for this repository. **Always load the relevant codemaps as your first action** when starting a new task, before performing broad file exploration or grep searches.
+**CRITICAL:** Codemaps in `docs/CODEMAPS/` are the authoritative, token-efficient source of truth for this repository. Follow these rules exactly:
 
-| Task type | Codemap(s) to load |
-|---|---|
-| Understanding overall system design, how patterns differ, or data flow | `docs/CODEMAPS/architecture.md` |
-| Deep dive into architectural decisions and trade-offs | `docs/CODEMAPS/architecture.md` + `docs/CODEMAPS/dependencies.md` |
-| Working on Go backend code: packages, types, interfaces, dispatch, executor | `docs/CODEMAPS/backend.md` |
-| Working on UI, SSE streaming, or HTMX templates | `docs/CODEMAPS/frontend.md` |
-| Adding or auditing external libraries | `docs/CODEMAPS/dependencies.md` |
-| Adding a new pattern | `docs/CODEMAPS/architecture.md` + `docs/CODEMAPS/backend.md` |
-| Writing or debugging tests, understanding test helpers or infra | `docs/CODEMAPS/testing.md` |
-| Debugging a full request path (API → dispatch → SSE) | all five codemaps |
+1. **At the start of every session, read every file found under `docs/CODEMAPS/` (including subdirectories) — do not skip any.**
+2. **Answer directly from codemap knowledge. Do not read source files for questions the codemaps already cover.** Only read source files when the codemaps explicitly do not cover the topic, or when the user asks for implementation-level details beyond what the codemaps provide. **Do not use Glob, Grep, or Read on source files to "verify" or "supplement" codemap answers — this is wasteful and violates the codemap-first principle.**
 
 Use `tree .` for the full nested file structure when needed.
 
