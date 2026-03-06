@@ -22,6 +22,95 @@ A project exploring various work-distribution patterns with progressively increa
 
 All patterns expose an **identical HTTP API** and **identical HTMX frontend**. Only the internal dispatch mechanism and layering changes.
 
+## Pattern Diagrams
+
+### P1: Local-Channels (Single Process)
+Simplest: everything in one process using goroutines and unbuffered channels.
+
+```mermaid
+graph LR
+    Browser -->|HTTP/SSE| API["🌐 API + Manager<br/>(single process)"]
+    API -->|dispatch| CD["ChannelDispatcher"]
+    CD -->|events chan| Worker["👷 Worker Goroutines<br/>(pool)"]
+    Worker -->|emit| Bridge["MemoryBridge"]
+    Bridge -->|subscribe| Hub["SSE Hub"]
+    Hub -->|events| Browser
+```
+
+### P2: Pull-REST (REST Polling)
+Workers poll for tasks; decouples processes but creates latency.
+
+```mermaid
+graph LR
+    Browser -->|HTTP| API["🌐 API<br/>(:8080)"]
+    API -->|http| Manager["📊 Manager<br/>(:8081)"]
+    Manager -->|task queue| RD["RESTDispatcher"]
+    Worker["👷 Worker<br/>(:8082-84)"] -->|GET /work/next| RD
+    Worker -->|POST /work/events| Manager
+    Manager -->|sse| Hub["SSE Hub"]
+    Hub -->|events| Browser
+```
+
+### P3: Push-WebSocket (WebSocket Hub)
+Manager pushes tasks to connected workers; persistent connection per worker.
+
+```mermaid
+graph LR
+    Browser -->|HTTP| API["🌐 API<br/>(:8080)"]
+    API -->|http| Manager["📊 Manager<br/>(:8081)"]
+    Manager -->|WS manage| WD["WebSocketDispatcher<br/>(hub)"]
+    Worker["👷 Worker ×3<br/>(:8082-84)"] -->|WS connect| WD
+    WD -->|push task| Worker
+    Worker -->|emit event| Manager
+    Manager -->|sse| Hub["SSE Hub"]
+    Hub -->|events| Browser
+```
+
+### P4: Streaming-gRPC (gRPC Bidirectional)
+High-performance bidirectional streams for task dispatch and event handling.
+
+```mermaid
+graph LR
+    Browser -->|HTTP| API["🌐 API<br/>(:8080)"]
+    API -->|http| Manager["📊 Manager<br/>(:8081)"]
+    Manager -->|gRPC manage| GD["gRPCDispatcher<br/>(:9090)"]
+    Worker["👷 Worker ×N<br/>(:8082-84)"] -->|gRPC stream| GD
+    GD -->|bidirectional| Worker
+    Worker -->|stream event| Manager
+    Manager -->|sse| Hub["SSE Hub"]
+    Hub -->|events| Browser
+```
+
+### P5: Brokered-NATS (Distributed Queue)
+Multiple API replicas; NATS JetStream for durable queues; PostgreSQL for state.
+
+```mermaid
+graph LR
+    Browser -->|HTTP| API["🌐 API ×N<br/>(:8080)"]
+    API -->|http| Manager["📊 Manager<br/>(:8081)"]
+    Manager -->|publish| NATS["🔥 NATS JetStream<br/>(queue)"]
+    Worker["👷 Worker ×N<br/>(:8082+)"] -->|subscribe| NATS
+    Worker -->|emit| Manager
+    Manager -->|persist| PG["🗄️ PostgreSQL"]
+    Manager -->|sse| Hub["SSE Hub"]
+    Hub -->|events| Browser
+```
+
+### P6: Cloud-PubSub (Multi-Cloud Abstraction)
+Broker-agnostic abstraction via gocloud.dev; supports NATS, Kafka, AWS SNS/SQS.
+
+```mermaid
+graph LR
+    Browser -->|HTTP| API["🌐 API ×N<br/>(:8080)"]
+    API -->|http| Manager["📊 Manager<br/>(:8081)"]
+    Manager -->|publish| Broker["☁️ Broker<br/>(NATS/Kafka/AWS)"]
+    Worker["👷 Worker ×N<br/>(:8082+)"] -->|subscribe| Broker
+    Worker -->|emit| Manager
+    Manager -->|persist| PG["🗄️ PostgreSQL"]
+    Manager -->|sse| Hub["SSE Hub"]
+    Hub -->|events| Browser
+```
+
 ## Prerequisites
 
 ### Runtime Dependencies (Required)
