@@ -25,90 +25,246 @@ All patterns expose an **identical HTTP API** and **identical HTMX frontend**. O
 ## Pattern Diagrams
 
 ### P1: Local-Channels (Single Process)
-Simplest: everything in one process using goroutines and unbuffered channels.
+**Single process:** API, Manager, and Workers run as goroutines in one process.
 
 ```mermaid
-graph LR
-    Browser -->|HTTP/SSE| API["🌐 API + Manager<br/>(single process)"]
-    API -->|dispatch| CD["ChannelDispatcher"]
-    CD -->|events chan| Worker["👷 Worker Goroutines<br/>(pool)"]
-    Worker -->|emit| Bridge["MemoryBridge"]
-    Bridge -->|subscribe| Hub["SSE Hub"]
-    Hub -->|events| Browser
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        Browser["Browser<br/>(HTTP/SSE)"]
+    end
+
+    subgraph L2["📦 Single Process"]
+        subgraph L2a["Shared API Layer"]
+            API["API Server<br/>(Echo)"]
+            Hub["SSE Hub"]
+        end
+
+        subgraph L2b["Manager Layer"]
+            Manager["Manager"]
+        end
+
+        subgraph L2c["Transport Layer ⚡ VARIATION POINT"]
+            CD["ChannelDispatcher<br/>(unbuffered chan)"]
+        end
+
+        subgraph L2d["Worker Layer"]
+            Workers["Worker Goroutines<br/>(pool)"]
+        end
+
+        subgraph L2e["Event Layer"]
+            Bridge["MemoryBridge"]
+        end
+    end
+
+    Browser -->|POST /tasks<br/>GET /events| API
+    API -->|Submit/Get/List| Manager
+    Manager -->|Dispatch| CD
+    CD -->|events chan| Workers
+    Workers -->|Emit| Bridge
+    Bridge -->|Subscribe| Hub
+    Hub -->|SSE events| Browser
 ```
 
 ### P2: Pull-REST (REST Polling)
-Workers poll for tasks; decouples processes but creates latency.
+**Separate processes:** API and Manager on different ports. Workers poll Manager for tasks.
 
 ```mermaid
-graph LR
-    Browser -->|HTTP| API["🌐 API<br/>(:8080)"]
-    API -->|http| Manager["📊 Manager<br/>(:8081)"]
-    Manager -->|task queue| RD["RESTDispatcher"]
-    Worker["👷 Worker<br/>(:8082-84)"] -->|GET /work/next| RD
-    Worker -->|POST /work/events| Manager
-    Manager -->|sse| Hub["SSE Hub"]
-    Hub -->|events| Browser
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        Browser["Browser<br/>(HTTP/SSE)"]
+    end
+
+    subgraph L2["API Process :8080"]
+        API["API Server<br/>(Echo)"]
+        SSEHub["SSE Hub"]
+    end
+
+    subgraph L3["Manager Process :8081"]
+        Manager["Manager"]
+        subgraph L3a["Transport Layer ⚡ VARIATION POINT"]
+            RD["RESTDispatcher<br/>(HTTP handlers)"]
+        end
+    end
+
+    subgraph L4["Worker Processes :8082+"]
+        Workers["Workers<br/>(polling)"]
+    end
+
+    subgraph L5["Event Layer"]
+        EventBridge["MemoryBridge"]
+    end
+
+    Browser -->|POST /tasks<br/>GET /events| API
+    API -->|HTTP RemoteTaskManager| Manager
+    Manager -->|Task queue| RD
+    Workers -->|GET /work/next<br/>POST /work/events| RD
+    Manager -->|Emit events| EventBridge
+    EventBridge -->|Subscribe| SSEHub
+    SSEHub -->|SSE events| Browser
 ```
 
 ### P3: Push-WebSocket (WebSocket Hub)
-Manager pushes tasks to connected workers; persistent connection per worker.
+**Separate processes with persistent connections:** Manager owns WebSocket hub, pushes tasks to workers.
 
 ```mermaid
-graph LR
-    Browser -->|HTTP| API["🌐 API<br/>(:8080)"]
-    API -->|http| Manager["📊 Manager<br/>(:8081)"]
-    Manager -->|WS manage| WD["WebSocketDispatcher<br/>(hub)"]
-    Worker["👷 Worker ×3<br/>(:8082-84)"] -->|WS connect| WD
-    WD -->|push task| Worker
-    Worker -->|emit event| Manager
-    Manager -->|sse| Hub["SSE Hub"]
-    Hub -->|events| Browser
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        Browser["Browser<br/>(HTTP/SSE)"]
+    end
+
+    subgraph L2["API Process :8080"]
+        API["API Server<br/>(Echo)"]
+        SSEHub["SSE Hub"]
+    end
+
+    subgraph L3["Manager Process :8081"]
+        Manager["Manager"]
+        subgraph L3a["Transport Layer ⚡ VARIATION POINT"]
+            WD["WebSocketDispatcher<br/>(WS hub)"]
+        end
+    end
+
+    subgraph L4["Worker Processes :8082+"]
+        Workers["Workers ×3<br/>(persistent WS)"]
+    end
+
+    subgraph L5["Event Layer"]
+        EventBridge["MemoryBridge"]
+    end
+
+    Browser -->|POST /tasks<br/>GET /events| API
+    API -->|HTTP RemoteTaskManager| Manager
+    Manager -->|Dispatch via| WD
+    Workers -->|WS /ws/register<br/>receive tasks| WD
+    Workers -->|Emit events| Manager
+    Manager -->|Emit events| EventBridge
+    EventBridge -->|Subscribe| SSEHub
+    SSEHub -->|SSE events| Browser
 ```
 
 ### P4: Streaming-gRPC (gRPC Bidirectional)
-High-performance bidirectional streams for task dispatch and event handling.
+**Separate processes with bidirectional streams:** Manager runs dual listeners (HTTP + gRPC) for high-performance streaming.
 
 ```mermaid
-graph LR
-    Browser -->|HTTP| API["🌐 API<br/>(:8080)"]
-    API -->|http| Manager["📊 Manager<br/>(:8081)"]
-    Manager -->|gRPC manage| GD["gRPCDispatcher<br/>(:9090)"]
-    Worker["👷 Worker ×N<br/>(:8082-84)"] -->|gRPC stream| GD
-    GD -->|bidirectional| Worker
-    Worker -->|stream event| Manager
-    Manager -->|sse| Hub["SSE Hub"]
-    Hub -->|events| Browser
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        Browser["Browser<br/>(HTTP/SSE)"]
+    end
+
+    subgraph L2["API Process :8080"]
+        API["API Server<br/>(Echo)"]
+        SSEHub["SSE Hub"]
+    end
+
+    subgraph L3["Manager Process"]
+        subgraph L3a[":8081 HTTP"]
+            Manager["Manager"]
+        end
+        subgraph L3b[":9090 gRPC + Transport Layer ⚡ VARIATION POINT"]
+            GD["gRPCDispatcher<br/>(bidirectional stream)"]
+        end
+    end
+
+    subgraph L4["Worker Processes :8082+"]
+        Workers["Workers ×N<br/>(gRPC stream)"]
+    end
+
+    subgraph L5["Event Layer"]
+        EventBridge["MemoryBridge"]
+    end
+
+    Browser -->|POST /tasks<br/>GET /events| API
+    API -->|HTTP RemoteTaskManager| Manager
+    Manager -->|Dispatch via| GD
+    Workers -->|gRPC bidirectional<br/>stream| GD
+    Workers -->|Emit events| Manager
+    Manager -->|Emit events| EventBridge
+    EventBridge -->|Subscribe| SSEHub
+    SSEHub -->|SSE events| Browser
 ```
 
-### P5: Brokered-NATS (Distributed Queue)
-Multiple API replicas; NATS JetStream for durable queues; PostgreSQL for state.
+### P5: Brokered-NATS (Distributed Event-Driven)
+**Horizontally scaled:** Multiple API replicas, NATS JetStream for queuing, PostgreSQL for durability.
 
 ```mermaid
-graph LR
-    Browser -->|HTTP| API["🌐 API ×N<br/>(:8080)"]
-    API -->|http| Manager["📊 Manager<br/>(:8081)"]
-    Manager -->|publish| NATS["🔥 NATS JetStream<br/>(queue)"]
-    Worker["👷 Worker ×N<br/>(:8082+)"] -->|subscribe| NATS
-    Worker -->|emit| Manager
-    Manager -->|persist| PG["🗄️ PostgreSQL"]
-    Manager -->|sse| Hub["SSE Hub"]
-    Hub -->|events| Browser
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        Browser["Browser<br/>(HTTP/SSE)"]
+    end
+
+    subgraph L2["API Layer :8080 ×N"]
+        APIs["API Replicas<br/>(Echo)"]
+        SSEHub["SSE Hub"]
+    end
+
+    subgraph L3["Manager Process :8081"]
+        Manager["Manager<br/>(lifecycle, deadline)"]
+    end
+
+    subgraph L4["Transport Layer ⚡ VARIATION POINT"]
+        NATS["🔥 NATS JetStream<br/>(durable queue)"]
+    end
+
+    subgraph L5["Worker Layer :8082+ ×N"]
+        Workers["Workers<br/>(queue-subscribe)"]
+    end
+
+    subgraph L6["Persistence Layer"]
+        EventBridge["NATSBridge<br/>(event routing)"]
+        PG["🗄️ PostgreSQL<br/>(task state)"]
+    end
+
+    Browser -->|POST /tasks<br/>GET /events| APIs
+    APIs -->|HTTP RemoteTaskManager| Manager
+    Manager -->|Publish tasks.new| NATS
+    Workers -->|Subscribe tasks.new| NATS
+    Workers -->|Emit task.events.*| Manager
+    Manager -->|Persist| PG
+    Manager -->|Publish events| EventBridge
+    EventBridge -->|Subscribe| SSEHub
+    SSEHub -->|SSE events| Browser
 ```
 
-### P6: Cloud-PubSub (Multi-Cloud Abstraction)
-Broker-agnostic abstraction via gocloud.dev; supports NATS, Kafka, AWS SNS/SQS.
+### P6: Cloud-PubSub (Multi-Cloud Event-Driven)
+**Cloud-agnostic abstraction:** Broker-agnostic via gocloud.dev (NATS/Kafka/AWS SNS-SQS), same distributed topology as P5.
 
 ```mermaid
-graph LR
-    Browser -->|HTTP| API["🌐 API ×N<br/>(:8080)"]
-    API -->|http| Manager["📊 Manager<br/>(:8081)"]
-    Manager -->|publish| Broker["☁️ Broker<br/>(NATS/Kafka/AWS)"]
-    Worker["👷 Worker ×N<br/>(:8082+)"] -->|subscribe| Broker
-    Worker -->|emit| Manager
-    Manager -->|persist| PG["🗄️ PostgreSQL"]
-    Manager -->|sse| Hub["SSE Hub"]
-    Hub -->|events| Browser
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        Browser["Browser<br/>(HTTP/SSE)"]
+    end
+
+    subgraph L2["API Layer :8080 ×N"]
+        APIs["API Replicas<br/>(Echo)"]
+        SSEHub["SSE Hub"]
+    end
+
+    subgraph L3["Manager Process :8081"]
+        Manager["Manager<br/>(lifecycle, deadline)"]
+    end
+
+    subgraph L4["Transport Layer ⚡ VARIATION POINT"]
+        Broker["☁️ Broker Abstraction<br/>(gocloud.dev)<br/>NATS | Kafka | AWS SNS/SQS"]
+    end
+
+    subgraph L5["Worker Layer :8082+ ×N"]
+        Workers["Workers<br/>(subscribe)"]
+    end
+
+    subgraph L6["Persistence Layer"]
+        EventBridge["CloudBridge<br/>(event routing)"]
+        PG["🗄️ PostgreSQL<br/>(task state)"]
+    end
+
+    Browser -->|POST /tasks<br/>GET /events| APIs
+    APIs -->|HTTP RemoteTaskManager| Manager
+    Manager -->|Publish tasks topic| Broker
+    Workers -->|Subscribe tasks topic| Broker
+    Workers -->|Emit events| Manager
+    Manager -->|Persist| PG
+    Manager -->|Publish events| EventBridge
+    EventBridge -->|Subscribe| SSEHub
+    SSEHub -->|SSE events| Browser
 ```
 
 ## Prerequisites
@@ -211,24 +367,54 @@ make run-p6 BROKER=aws
 # open http://localhost:8080
 ```
 
-## Architecture
+## Layered Architecture Overview
 
-```
-Browser
-  │  HTTP POST /tasks, GET /tasks, GET /tasks/{id}
-  │  SSE  GET /events
-  ▼
-┌─────────────────────────────────────────────────────┐
-│  shared/api  (HTTP handlers + SSE — 100% shared)    │
-│  POST /tasks → manager.Submit(task)                 │
-│  GET  /events → sse.Hub.Subscribe()                 │
-└──────────────────┬──────────────────────────────────┘
-                   │ contracts.TaskDispatcher interface
-        ┌──────────┴─────────────────────────────────┐
-        │                                            │
-      p01                                p02 / p03 / p04 / p05 / p06
-  ChannelDispatcher                  REST/WS/gRPC/NATS/CloudDispatcher
-  (in-process)                        (routes to external workers)
+All patterns share the same HTTP API and Manager, with **one variation point**: the **Transport Layer** (`contracts.TaskDispatcher` / `contracts.TaskConsumer`).
+
+```mermaid
+graph TB
+    subgraph L1["🌐 Browser Layer"]
+        B["Browser (UI)"]
+    end
+
+    subgraph L2["📡 API Layer (100% Shared)"]
+        API["shared/api<br/>(HTTP handlers, HTMX)"]
+        SSE["shared/sse<br/>(Hub)"]
+    end
+
+    subgraph L3["📊 Manager Layer (100% Shared)"]
+        MGR["shared/manager<br/>(Task lifecycle, deadlines,<br/>event routing)"]
+    end
+
+    subgraph L4["⚡ VARIATION POINT: Transport Layer"]
+        P1["P1: ChannelDispatcher<br/>(in-process)"]
+        P234["P2/P3/P4:<br/>REST/WS/gRPC"]
+        P56["P5/P6:<br/>NATS/CloudPubSub"]
+    end
+
+    subgraph L5["👷 Worker Layer (Pluggable)"]
+        W["shared/executor<br/>(Stage runner)"]
+    end
+
+    subgraph L6["💾 Persistence Layer"]
+        STORE["shared/store<br/>(TaskStore interface)<br/>Memory | PostgreSQL"]
+        EVENTS["shared/events<br/>(TaskEventBridge)<br/>Memory | NATS | Cloud"]
+    end
+
+    B -->|HTTP<br/>POST /tasks<br/>GET /tasks/:id<br/>GET /events| API
+    API -->|manager.Submit(task)| MGR
+    MGR -->|Dispatch/Receive<br/>contracts.TaskDispatcher| P1
+    MGR -->|Dispatch/Receive<br/>contracts.TaskDispatcher| P234
+    MGR -->|Dispatch/Receive<br/>contracts.TaskDispatcher| P56
+    P1 -->|contracts.TaskConsumer| W
+    P234 -->|contracts.TaskConsumer| W
+    P56 -->|contracts.TaskConsumer| W
+    W -->|Create/Get/List<br/>contracts.TaskStore| STORE
+    W -->|Emit events<br/>TaskEventBridge| EVENTS
+    EVENTS -->|Subscribe| SSE
+    SSE -->|SSE events| B
+    MGR -->|Persist state| STORE
+    MGR -->|Publish events| EVENTS
 ```
 
 ## Testing
