@@ -41,13 +41,13 @@ From the diff, identify:
 
 Read only the codemaps affected by the identified changes and apply targeted edits — change only the sections that reflect the diff. Do not rewrite unaffected sections. Keep each codemap under 1000 tokens.
 
-| Codemap | Update when… |
-|---------|-------------|
-| `docs/CODEMAPS/architecture.md` | interfaces or contracts change, new components added, data/event flow changes |
-| `docs/CODEMAPS/backend.md` | source files, packages, or API routes added/removed/changed |
-| `docs/CODEMAPS/frontend.md` | UI templates, client-side logic, or component structure changes |
-| `docs/CODEMAPS/dependencies.md` | dependency manifest, env vars, container topology, or build targets change |
-| `docs/CODEMAPS/testing.md` | test infrastructure, helpers, commands, or test-specific behaviour changes |
+| Codemap | Update when… | Owns (do not duplicate elsewhere) |
+|---------|-------------|----------------------------------|
+| `docs/CODEMAPS/architecture.md` | interfaces or contracts change, new components added, data/event flow changes | System overview, topology diagrams, data/event flows, shared abstractions in prose — no code blocks |
+| `docs/CODEMAPS/backend.md` | source files, packages, or API routes added/removed/changed | Package roles, API routes, backend type/interface signatures and code blocks, component notes |
+| `docs/CODEMAPS/frontend.md` | UI templates, client-side logic, or component structure changes | Stack, templates/views, client-side event flows, component structure, frontend type/interface signatures |
+| `docs/CODEMAPS/dependencies.md` | dependency manifest, env vars, container topology, or build targets change | External dependencies, env vars, build/make targets, service topology |
+| `docs/CODEMAPS/testing.md` | test infrastructure, helpers, commands, or test-specific behaviour changes | Test commands, test structure, infrastructure setup, test helpers, gotchas |
 
 ---
 
@@ -57,11 +57,11 @@ Answers structural, component-level questions. Create if absent.
 
 1. **System overview** — one paragraph or bullet list: what the system does and how the major components relate
 2. **Process/service topology** — table of processes or services with their role, port, and transport (what talks to what, and how)
-3. **Data and event flows** — Mermaid diagrams for the major request/event paths; one diagram per distinct flow or variation point
+3. **Data and event flows** — For linear flows, use compact chain notation (`A →|endpoint| B → C`); use Mermaid only when there is branching or fan-out. One diagram or chain per distinct flow.
 4. **Shared interfaces and contracts** — the key abstractions that decouple components; include sentinel errors and their HTTP/status mappings
 5. **Design Invariants** — cross-cutting rules that span multiple components; keep as a `## Design Invariants` section using the format in the Inline Rationale section below
 
-Skip file paths and function signatures — those belong in `backend.md`.
+Skip file paths, function signatures, and full interface/type code blocks — those belong in `backend.md`. Describe shared abstractions in prose only.
 
 ---
 
@@ -71,8 +71,8 @@ Answers source-level questions. Create if absent.
 
 1. **Package/module roles** — table of package path → one-line role (what it owns, not how it works internally)
 2. **API routes** — method, path, handler name, one-line description; note which process owns each route when multiple processes exist
-3. **Key type and interface signatures** — the actual signatures (not paraphrases) for interfaces, constructors, and entry points an agent would call or implement
-4. **Component-specific notes** — non-obvious behaviour per component not captured by the interface alone: connection lifecycle, backpressure, ordering constraints, compile-time enforcement
+3. **Key type and interface signatures** — the actual signatures (not paraphrases) for interfaces, constructors, and entry points an agent would call or implement. For concrete types that implement an interface, list only the constructor — do not repeat the interface's method signatures.
+4. **Component-specific notes** — Express as `⚠` annotations on the relevant package-table or route-table row. Create a named section only when there are 3+ non-obvious facts that cannot fit inline.
 
 Skip env vars and build targets — those belong in `dependencies.md`. Skip flow diagrams — those belong in `architecture.md`. Add `⚠` annotations inline for active constraints (see Inline Rationale Annotations below).
 
@@ -87,6 +87,7 @@ Answers stack, template, and client-side behaviour questions. Create if absent.
 3. **Client-side event and data flow** — how the client receives updates (SSE, WebSocket, polling); one table row per event type with payload fields and DOM/state effects
 4. **Component/DOM structure** — the key structural elements an agent needs to add a new UI feature or extend an existing one
 5. **Client-side functions** — table of functions with a one-line description; note any lifecycle or ordering requirements
+6. **Config and build file inventories** — For files following a regular naming convention, state the convention in one line and list only exceptions and entries with non-standard outputs or `⚠` constraints.
 
 Skip backend route logic — that belongs in `backend.md`.
 
@@ -248,6 +249,8 @@ Prefer a Markdown table over a diagram for:
 
 - Focus on **high-level structure**, not implementation details
 - Prefer **file paths and function signatures** over full code blocks
-- Keep each codemap under **1000 tokens** for efficient context loading
+- Keep each codemap under **4000 chars (~1000 tokens)** for efficient context loading
 - Run after major feature additions or refactoring sessions
-- **Prefer Mermaid over prose for flows** — a 10-node diagram replaces a paragraph of text and costs fewer tokens; look for opportunities to convert topology, event flow, or state machine descriptions into diagrams
+- **No Status columns** — never add implementation-progress columns (✓, 🔨, TODO) to tables; if incompleteness affects how to call or implement something, add a `⚠` on that row only
+- **Fragment cells** — table cells should be noun phrases or fragments (≤10 words); move constraints to `⚠` annotations rather than embedding them in the description cell
+- **Prefer chain notation over prose for linear flows** — `A →|endpoint| B → C` replaces a numbered list; use Mermaid only when there is branching or fan-out

@@ -9,6 +9,24 @@
 
 A project exploring various work-distribution patterns with progressively increasing scalability and decoupling.
 
+## Layered Architecture Overview
+
+All patterns share the same HTTP API and Manager, with **one variation point**: the **Transport Layer** (`contracts.TaskDispatcher` / `contracts.TaskConsumer`).
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(shared/api · shared/sse)"]
+    Manager["Manager Layer<br/>(shared/manager · shared/store)"]
+    Transport["⚡ Transport<br/>VARIATION POINT<br/>P1: Channel<br/>P2: REST · P3: WS · P4: gRPC<br/>P5: NATS · P6: gocloud"]
+    Workers["Worker Layer<br/>(shared/executor)"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"TaskManager"| Manager
+    Manager <-->|"TaskDispatcher"| Transport
+    Transport <-->|"TaskConsumer (tasks · events)"| Workers
+```
+
 ## Patterns
 
 | Pattern | Topology | Communication Style | Full-Stack Layering |
@@ -21,6 +39,98 @@ A project exploring various work-distribution patterns with progressively increa
 | **p06: Cloud-PubSub** | N APIs + N workers | gocloud.dev (NATS/Kafka/AWS) | Multi-Cloud Event-Driven |
 
 All patterns expose an **identical HTTP API** and **identical HTMX frontend**. Only the internal dispatch mechanism and layering changes.
+
+## Pattern Diagrams
+
+### P1: Local-Channels (Single Process)
+**Single process:** API, Manager, and Workers run as goroutines in one process.
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager Layer<br/>(Manager · ChannelDispatcher)"]
+    Workers["Worker Layer<br/>(goroutine pool)"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"submit · stream"| Manager
+    Manager <-->|"channel (tasks · events)"| Workers
+```
+
+### P2: Pull-REST (REST Polling)
+**Separate processes:** API and Manager on different ports. Workers poll Manager for tasks.
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager Layer<br/>(Manager · RESTDispatcher)"]
+    Workers["Worker Layer<br/>(polling workers)"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"HTTP"| Manager
+    Manager <-->|"GET /work/next<br/>POST /work/events"| Workers
+```
+
+### P3: Push-WebSocket (WebSocket Hub)
+**Separate processes with persistent connections:** Manager owns WebSocket hub, pushes tasks to workers.
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager Layer<br/>(Manager · WebSocketDispatcher)"]
+    Workers["Worker Layer<br/>(workers)"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"HTTP"| Manager
+    Manager <-->|"WebSocket (tasks · events)"| Workers
+```
+
+### P4: Streaming-gRPC (gRPC Bidirectional)
+**Separate processes with bidirectional streams:** Manager runs dual listeners (HTTP + gRPC) for high-performance streaming.
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager Layer<br/>(Manager · gRPCDispatcher)"]
+    Workers["Worker Layer<br/>(workers)"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"HTTP"| Manager
+    Manager <-->|"gRPC bidi (tasks · events)"| Workers
+```
+
+### P5: Brokered-NATS (Distributed Event-Driven)
+**Horizontally scaled:** Multiple API replicas, NATS JetStream for queuing, PostgreSQL for durability.
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager Layer<br/>(Manager · PostgreSQL · NATS JetStream)"]
+    Workers["Worker Layer"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"HTTP · events"| Manager
+    Manager <-->|"tasks · events"| Workers
+```
+
+### P6: Cloud-PubSub (Multi-Cloud Event-Driven)
+**Cloud-agnostic abstraction:** Broker-agnostic via gocloud.dev (NATS/Kafka/AWS SNS-SQS), same distributed topology as P5.
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager Layer<br/>(Manager · PostgreSQL · <br/>Broker(NATS | Kafka | AWS))"]
+    Workers["Worker Layer"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"HTTP · events"| Manager
+    Manager <-->|"tasks · events"| Workers
+```
 
 ## Prerequisites
 
@@ -120,26 +230,6 @@ make run-p6 BROKER=kafka
 make run-p6 BROKER=aws
 
 # open http://localhost:8080
-```
-
-## Architecture
-
-```
-Browser
-  │  HTTP POST /tasks, GET /tasks, GET /tasks/{id}
-  │  SSE  GET /events
-  ▼
-┌─────────────────────────────────────────────────────┐
-│  shared/api  (HTTP handlers + SSE — 100% shared)    │
-│  POST /tasks → manager.Submit(task)                 │
-│  GET  /events → sse.Hub.Subscribe()                 │
-└──────────────────┬──────────────────────────────────┘
-                   │ contracts.TaskDispatcher interface
-        ┌──────────┴─────────────────────────────────┐
-        │                                            │
-      p01                                p02 / p03 / p04 / p05 / p06
-  ChannelDispatcher                  REST/WS/gRPC/NATS/CloudDispatcher
-  (in-process)                        (routes to external workers)
 ```
 
 ## Testing

@@ -14,15 +14,14 @@ Six patterns demonstrating different work distribution topologies, all sharing t
 | `events.TaskEventBridge` | Publish/Subscribe | Event streaming |
 | `store.TaskStore` | Create/Get/List/SetStatus | Persistence |
 
-- `shared/client.RemoteTaskManager`: proxies Submit/Get/List over HTTP (P2–P6 APIs)
-- Sentinel errors: `ErrDispatchFull` → 429, `ErrNoWorkers` → 503
-- Manager republishes worker events to `TaskEventBridge` before SSE reaches browser
+- `RemoteTaskManager`: HTTP proxy for Submit/Get/List (P2–P6 APIs)
+- Errors: `ErrDispatchFull` → 429, `ErrNoWorkers` → 503
 
 ## Design Invariants
 
-- **Manager republishes to event bus after worker event processing** — ⚠ skipping this breaks P5/P6 consistency (SSE arrives before DB write).
-- **API never accesses store directly** — ⚠ breaks P2–P6 where store is manager-local; use `TaskManager.Get/List` instead.
-- **`WaitForWorker` waits for probe task completion (not just accept)** — ⚠ for P3/P4, worker must be idle before test suite starts.
+- **Manager republishes events** — ⚠ skipping breaks P5/P6 (SSE arrives before DB write).
+- **API uses `TaskManager` abstraction** — ⚠ never access store directly; manager-local in P2–P6.
+- **Tests: `WaitForWorker` waits for completion** — ⚠ ensures worker idle before suite (P3/P4).
 
 ## Process Topology
 
@@ -41,23 +40,22 @@ Six patterns demonstrating different work distribution topologies, all sharing t
 **Manager** (`shared/manager`): task lifecycle, deadline loop, event routing.
 **Transport** (per-pattern): TaskDispatcher + TaskConsumer implementations.
 
-## Pattern 1: Goroutine Pool (single process)
+## Data Flow Diagrams
 
+See [details/backend-patterns.md](./details/backend-patterns.md) for wiring details.
+
+### P1: Goroutine Pool
 ```mermaid
 flowchart LR
     Browser -->|POST /tasks| API
-    API --> Manager
-    Manager --> CD[ChannelDispatcher]
+    API --> Manager --> CD[ChannelDispatcher]
     CD -->|events chan| Worker
     Worker -->|Emit| MB[MemoryBridge]
     MB -->|pump| Hub[SSE Hub]
     Hub -->|GET /events| Browser
 ```
 
-Single-process: ChannelDispatcher/Consumer share in-process event channel. See [details/backend-patterns.md](./details/backend-patterns.md) for setup.
-
-## Pattern 2: REST Polling (separate processes)
-
+### P2: REST Polling
 ```mermaid
 flowchart LR
     Browser -->|POST /tasks| API
@@ -66,16 +64,11 @@ flowchart LR
     Worker -->|GET /work/next| RD
     Worker -->|POST /work/events| Manager
     Manager --> MB[MemoryBridge]
-    MB --> MgrHub[mgr hub]
-    API -->|sse.Client| MgrHub
-    API --> Hub[local hub]
+    MB -->|sse.Client| Hub[API hub]
     Hub -->|GET /events| Browser
 ```
 
-Workers poll manager (GET /work/next). API proxies over HTTP via RemoteTaskManager. See [details/backend-patterns.md](./details/backend-patterns.md).
-
-## Pattern 3: WebSocket Hub (separate processes)
-
+### P3: WebSocket Hub
 ```mermaid
 flowchart LR
     Browser -->|POST /tasks| API
@@ -84,17 +77,11 @@ flowchart LR
     Worker -->|WS /ws/register| WD
     WD -->|push task| Worker
     Worker -->|emit event| Manager
-    Manager --> MB[MemoryBridge]
-    MB --> MgrHub[mgr hub]
-    API -->|sse.Client| MgrHub
-    API --> Hub[local hub]
+    Manager -->|sse.Client| Hub[API hub]
     Hub -->|GET /events| Browser
 ```
 
-Manager pushes tasks to workers over WebSocket; round-robin dispatch. See [details/backend-patterns.md](./details/backend-patterns.md).
-
-## Pattern 4: gRPC Bidirectional Streaming (separate processes)
-
+### P4: gRPC Bidirectional
 ```mermaid
 flowchart LR
     Browser -->|POST /tasks| API
@@ -103,45 +90,32 @@ flowchart LR
     Worker -->|gRPC bidi stream| GD
     GD -->|stream task| Worker
     Worker -->|stream event| Manager
-    Manager --> MB[MemoryBridge]
-    MB --> MgrHub[mgr hub]
-    API -->|sse.Client| MgrHub
-    API --> Hub[local hub]
+    Manager -->|sse.Client| Hub[API hub]
     Hub -->|GET /events| Browser
 ```
 
-Workers and manager maintain bidirectional gRPC streams for task/event exchange. See [details/backend-patterns.md](./details/backend-patterns.md).
-
-## Pattern 5: Queue-and-Store (horizontally scaled)
-
+### P5: NATS + PostgreSQL
 ```mermaid
 flowchart LR
-    Browser -->|POST /tasks| nginx
-    nginx --> API
+    Browser -->|POST /tasks| API[API ×3]
     API -->|HTTP| Manager
-    Manager -->|JetStream tasks.new| Worker
-    Worker -->|worker.events.id| Manager
+    Manager -->|tasks.new| Worker
+    Worker -->|task.events.*| Manager
     Manager --> NB[NATSBridge]
-    NB -->|task.events.*| API
+    NB -->|events| API
     API -->|SSE| Browser
     Manager --> PG[(PostgreSQL)]
 ```
 
-Horizontally scaled: API replicas thin (RemoteTaskManager proxies), Manager/NATS/Postgres are single point. See [details/backend-patterns.md](./details/backend-patterns.md).
-
-## Pattern 6: Cloud-Agnostic PubSub (gocloud abstraction)
-
+### P6: Cloud PubSub (gocloud)
 ```mermaid
 flowchart LR
-    Browser -->|POST /tasks| nginx
-    nginx --> API
+    Browser -->|POST /tasks| API[API ×3]
     API -->|HTTP| Manager
     Manager -->|tasks topic| Worker
-    Worker -->|events.workers| Manager
+    Worker -->|events| Manager
     Manager --> CB[CloudBridge]
-    CB -->|events.api| API
+    CB -->|events| API
     API -->|SSE| Browser
     Manager --> PG[(PostgreSQL)]
 ```
-
-Broker-agnostic: same code for NATS/Kafka/AWS via gocloud abstraction. Select via `BROKER` env. See [details/backend-patterns.md](./details/backend-patterns.md).

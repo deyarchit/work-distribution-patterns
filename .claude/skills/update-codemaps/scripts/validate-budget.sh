@@ -7,7 +7,7 @@ set -euo pipefail
 # Usage: bash ./scripts/validate-budget.sh
 
 CODEMAPS_DIR="docs/CODEMAPS"
-LIMIT=6000
+LIMIT=4000
 
 if [ ! -d "$CODEMAPS_DIR" ]; then
     echo "No directory at $CODEMAPS_DIR — nothing to validate"

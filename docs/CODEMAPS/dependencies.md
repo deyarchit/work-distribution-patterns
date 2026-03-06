@@ -4,45 +4,34 @@
 
 | Dependency | Version | Why |
 |-----------|---------|-----|
-| `github.com/labstack/echo/v4` | v4.15.0 | HTTP router, middleware, template rendering |
-| `github.com/gorilla/websocket` | v1.5.3 | WebSocket transport (Pattern 3) |
-| `google.golang.org/grpc` | v1.x | gRPC framework (Pattern 4) |
-| `google.golang.org/protobuf` | v1.x | Protocol buffer runtime (Pattern 4) |
-| `github.com/nats-io/nats.go` | v1.48.0 | NATS JetStream client (Pattern 5/6) |
-| `github.com/jackc/pgx/v5` | v5.8.0 | PostgreSQL driver + `pgxpool` connection pool (Pattern 5/6) |
-| `github.com/google/uuid` | v1.6.0 | Task ID generation |
-| `github.com/kelseyhightower/envconfig` | v1.4.0 | Struct-based env config loading (all patterns) |
-| `gocloud.dev` | v0.41.0 | Cloud-agnostic abstraction for pub/sub (Pattern 6) |
-| `gocloud.dev/pubsub/awssnssqs` | v0.41.0 | AWS SNS/SQS driver for gocloud (Pattern 6 AWS) |
-| `github.com/pitabwire/natspubsub` | v0.0.x | NATS JetStream driver for gocloud (Pattern 6) |
-| `github.com/aws/aws-sdk-go-v2/config` | v1.41+ | AWS SDK v2 config loader (Pattern 6 AWS) |
-| `github.com/aws/aws-sdk-go-v2/service/sns` | v1.39+ | AWS SNS client (Pattern 6 AWS) |
-| `github.com/aws/aws-sdk-go-v2/service/sqs` | v1.42+ | AWS SQS client (Pattern 6 AWS) |
-| `github.com/testcontainers/testcontainers-go` | v0.x | Container orchestration for tests (integration tests) |
-| `github.com/testcontainers/testcontainers-go/modules/nats` | v0.x | NATS test container (P5/P6 integration tests) — ⚠ do not pass `WithArgument("-js","")`: JetStream is already on by default in this module and adding it causes conflicts |
-| `github.com/testcontainers/testcontainers-go/modules/postgres` | v0.x | PostgreSQL test container (P5/P6 integration tests) |
+| `echo/v4` | v4.15.0 | HTTP router + HTMX templates |
+| `gorilla/websocket` | v1.5.3 | P3 WebSocket transport |
+| `google.golang.org/grpc` | v1.x | P4 gRPC |
+| `protobuf` | v1.x | P4 protobuf |
+| `nats.go` | v1.48.0 | P5/P6 JetStream |
+| `pgx/v5` | v5.8.0 | P5/P6 PostgreSQL + pool |
+| `uuid` | v1.6.0 | Task IDs |
+| `envconfig` | v1.4.0 | Struct-based config |
+| `gocloud.dev` | v0.41.0 | P6 pubsub abstraction |
+| `aws-sdk-go-v2/*` | v1.x | P6 AWS SNS/SQS |
+| `testcontainers-go` | v0.x | P5/P6 NATS/Postgres — ⚠ omit `WithArgument("-js","")`; JetStream on by default |
 
 ## Environment Variables
 
-All env loading uses `envconfig.Process("", &cfg)` with a `config` struct and `default:` tags.
+All env loading uses `envconfig.Process("", &cfg)` with `default:` tags.
 
-| Variable | Default | Pattern | Purpose |
+| Variable | Default | Used by | Purpose |
 |----------|---------|---------|---------|
-| `ADDR` | `:8080` | All API/server | Listen address |
+| `ADDR` | `:8080` | All | Listen address |
 | `WORKERS` | `5` | P1 | Goroutine pool size |
-| `QUEUE_SIZE` | `20` | P1 | Max queued tasks before HTTP 429 |
-| `MAX_STAGE_DURATION` | `500` | P1, P2 worker, P3 worker, P5 worker | Max milliseconds per stage |
-| `MANAGER_URL` | `http://localhost:8081` | P2 API, P2 worker, P3 API, P5 API | Manager process base URL (HTTP for API; P2 worker also reads this) |
-| `WORKERS_QUEUE_SIZE` | `20` | P2 manager, P3 manager | Max queued tasks before HTTP 429 |
-| `MANAGER_URL` (WS) | `ws://localhost:8081/ws/register` | P3 worker | WebSocket registration endpoint on Manager |
-| `GRPC_ADDR` | `:9090` | P4 manager | gRPC server listen address |
-| `NATS_URL` | `nats://127.0.0.1:4222` | P5 API, P5 manager | NATS server URL (API: event subscription; manager: dispatch + events) |
-| `DATABASE_URL` | `postgres://tasks:tasks@localhost:5432/tasks?sslmode=disable` | P5 manager, P6 manager | PostgreSQL connection string |
-| `BROKER_URL` | `nats://nats:4222` | P6 API, P6 manager, P6 worker | Broker URL for gocloud (nats://, kafka://, or awssqs://) |
-| `AWS_ENDPOINT_URL` | `http://localhost:4566` | P6 (AWS broker only) | LocalStack endpoint for local AWS testing |
-| `AWS_REGION` | `us-east-1` | P6 (AWS broker only) | AWS region (used by SDKv2) |
-| `AWS_ACCESS_KEY_ID` | `test` | P6 (AWS broker only) | AWS access key (dummy for LocalStack) |
-| `AWS_SECRET_ACCESS_KEY` | `test` | P6 (AWS broker only) | AWS secret key (dummy for LocalStack) |
+| `QUEUE_SIZE` | `20` | P1–P3 manager | Max queued before 429 |
+| `MAX_STAGE_DURATION` | `500ms` | Worker | Max per-stage duration |
+| `MANAGER_URL` | `http://localhost:8081` | P2–P5 API/worker | Manager base URL |
+| `GRPC_ADDR` | `:9090` | P4 manager | gRPC listen address |
+| `NATS_URL` | `nats://127.0.0.1:4222` | P5 | NATS broker URL |
+| `DATABASE_URL` | `postgres://localhost/tasks` | P5–P6 manager | PostgreSQL connection |
+| `BROKER_URL` | `nats://nats:4222` | P6 | gocloud pubsub URL (nats://, kafka://, awssqs://) |
+| `AWS_*` | (test) | P6 AWS | AWS SDK v2 config; LocalStack for local testing |
 
 ## Container Topology
 
