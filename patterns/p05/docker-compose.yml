@@ -36,6 +36,8 @@ services:
       nats:
         condition: service_started
     restart: on-failure
+    deploy:
+      replicas: 3
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
       interval: 2s

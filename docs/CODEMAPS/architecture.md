@@ -31,8 +31,8 @@ Six patterns demonstrating different work distribution topologies, all sharing t
 | P2 | :8080 | :8081 | separate process | REST polling |
 | P3 | :8080 | :8081 | separate process | WebSocket push |
 | P4 | :8080 | :8081 | separate process | gRPC bidirectional stream |
-| P5 | :8080 (×3) | :8081 (×1) | separate process (×3) | NATS JetStream |
-| P6 | :8080 (×3) | :8081 (×1) | separate process (×3) | gocloud PubSub (JetStream) |
+| P5 | :8080 (×3) | :8081 (×3) | separate process (×3) | NATS JetStream |
+| P6 | :8080 (×3) | :8081 (×3) | separate process (×3) | gocloud PubSub (JetStream) |
 
 ## Layering
 

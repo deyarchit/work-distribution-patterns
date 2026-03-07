@@ -27,18 +27,34 @@ graph LR
     Transport <-->|"TaskConsumer (tasks · events)"| Workers
 ```
 
+## Design Principles
+
+Three invariant layers with fixed responsibilities. Only the transport between Manager and Worker varies across patterns.
+
+| Layer | Responsibility |
+|---|---|
+| **API** | Accepts tasks from the client. Submits to the Manager synchronously — only returns success after the Manager acknowledges. Streams progress to the client via SSE. Surfaces task status as reported by the Manager. |
+| **Manager** | Stores task state. Dispatches tasks to workers (fire-and-forget — no pickup guarantee). Receives progress and results from workers. Updates state and republishes events to the API layer. |
+| **Worker** | Executes tasks. Emits progress events and final status back to the Manager. Nothing else. |
+
+**Invariants that hold across all patterns:**
+- The client never talks to the Manager or Worker directly — only to the API.
+- The API submit is synchronous: the Manager must acknowledge before the API responds to the client.
+- The Manager does not wait for a worker to pick up a task. Dispatch is fire-and-forget.
+- The Manager always republishes worker events before the API layer delivers them to the client (ensures state is consistent before SSE reaches the browser).
+
 ## Patterns
 
-| Pattern | Topology | Communication Style | Full-Stack Layering |
-|---|---|---|---|
-| **p01: Local-Channels** | Single process | In-process channels | Embedded Monolith |
-| **p02: Pull-REST** | 1 API + N workers | HTTP Long-polling | Tiered Remote Polling |
-| **p03: Push-WebSocket** | 1 API + N workers | Persistent WebSockets | Tiered Remote Push |
-| **p04: Streaming-gRPC** | 1 API + N workers | gRPC Bidirectional Streams | Tiered Remote Streaming |
-| **p05: Brokered-NATS** | N APIs + N workers | NATS + PostgreSQL | Distributed Event-Driven |
-| **p06: Cloud-PubSub** | N APIs + N workers | gocloud.dev (NATS/Kafka/AWS) | Multi-Cloud Event-Driven |
+All patterns expose an **identical HTTP API** and **identical HTMX frontend**. The table below shows where each pattern follows the invariants and where the transport varies.
 
-All patterns expose an **identical HTTP API** and **identical HTMX frontend**. Only the internal dispatch mechanism and layering changes.
+| Pattern | Topology | Client ↔ API | API ↔ Manager | Manager → Worker (⚡ varies) | Worker → Manager (⚡ varies) | Manager → API (events) |
+|---|---|---|---|---|---|---|
+| **p01: Local-Channels** | Single process | HTTP · SSE | In-process call | Buffered channel | `MemoryBridge` publish | `MemoryBridge` subscribe |
+| **p02: Pull-REST** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | Worker polls `GET /work/next` | `POST /work/events` | SSE client on Manager |
+| **p03: Push-WebSocket** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | WebSocket push to idle worker | WebSocket emit | SSE client on Manager |
+| **p04: Streaming-gRPC** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gRPC bidirectional stream | gRPC bidirectional stream | SSE client on Manager |
+| **p05: Brokered-NATS** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | NATS JetStream `tasks.new` | NATS `worker.events.*` (queue group) | `NATSBridge` (fan-out to all APIs) |
+| **p06: Cloud-PubSub** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to all APIs) |
 
 ## Pattern Diagrams
 
@@ -103,7 +119,7 @@ graph LR
 ```
 
 ### P5: Brokered-NATS (Distributed Event-Driven)
-**Horizontally scaled:** Multiple API replicas, NATS JetStream for queuing, PostgreSQL for durability.
+**Horizontally scaled:** Multiple API, Manager, and Worker replicas. NATS JetStream for queuing (work-queue policy ensures each task goes to one worker; queue group ensures each event goes to one manager). PostgreSQL for durability.
 
 ```mermaid
 graph LR
@@ -118,7 +134,7 @@ graph LR
 ```
 
 ### P6: Cloud-PubSub (Multi-Cloud Event-Driven)
-**Cloud-agnostic abstraction:** Broker-agnostic via gocloud.dev (NATS/Kafka/AWS SNS-SQS), same distributed topology as P5.
+**Cloud-agnostic abstraction:** Same horizontally scaled topology as P5 (N APIs, N managers, N workers). Broker-agnostic via gocloud.dev (NATS/Kafka/AWS SNS-SQS); each broker's native consumer-group/queue semantics ensure each event is processed by exactly one manager.
 
 ```mermaid
 graph LR
