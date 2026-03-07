@@ -34,10 +34,12 @@ func NewNATSDispatcher(nc *nats.Conn, js nats.JetStreamContext) *NATSDispatcher 
 	}
 }
 
-// Start registers a single NATS Core subscription for all worker events.
-// It is non-blocking; the subscription callback pushes events into the internal channel.
+// Start registers a NATS Core queue-group subscription for all worker events.
+// Using a queue group ensures that with N manager replicas only one manager
+// processes each event. It is non-blocking; the subscription callback pushes
+// events into the internal channel.
 func (b *NATSDispatcher) Start(_ context.Context) error {
-	_, err := b.nc.Subscribe("worker.events.*", func(msg *nats.Msg) {
+	_, err := b.nc.QueueSubscribe("worker.events.*", "managers", func(msg *nats.Msg) {
 		var ev models.TaskEvent
 		if err := json.Unmarshal(msg.Data, &ev); err != nil {
 			return

@@ -41,8 +41,8 @@ All env loading uses `envconfig.Process("", &cfg)` with `default:` tags.
 | P2 | `[api]`, `[manager]`, `[worker×3]` | HTTP polling; `depends_on manager` |
 | P3 | `[api]`, `[manager]`, `[worker×3]` | WebSocket push; manager owns hub |
 | P4 | `[api]`, `[manager]` (HTTP + gRPC), `[worker×3]` | gRPC bidirectional streams |
-| P5 | `[nginx]` → `[api×3]`, `[manager]`, `[worker×3]`, `[nats]`, `[postgres]` | Queue-and-store; APIs thin proxies; ⚠ nats.conf required (JetStream persistence) |
-| P6 | `[nginx]` → `[api×3]`, `[manager]`, `[worker×3]`, `[broker]`, `[postgres]` | Broker-agnostic via gocloud; `BROKER=nats\|kafka\|aws` |
+| P5 | `[nginx]` → `[api×3]`, `[manager×3]`, `[worker×3]`, `[nats]`, `[postgres]` | Queue-and-store; manager uses NATS queue group (`managers`) so each worker event is processed by one manager; ⚠ nats.conf required (JetStream persistence) |
+| P6 | `[nginx]` → `[api×3]`, `[manager×3]`, `[worker×3]`, `[broker]`, `[postgres]` | Broker-agnostic via gocloud; broker-native consumer groups ensure each event goes to one manager; `BROKER=nats\|kafka\|aws` |
 
 P5/P6 use persistent volumes (nats-jetstream for NATS; postgres always ephemeral).
 
