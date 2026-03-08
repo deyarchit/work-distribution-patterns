@@ -4,7 +4,7 @@
 
 | Target | Scope | Infra |
 |--------|-------|-------|
-| `make test` | All 6 patterns (~40 s) | In-process only |
+| `make test` | All 7 patterns (~45 s) | In-process only |
 | `make test-e2e` | `RunSuite` vs external API | `BASE_URL=<url>` required |
 | `make test-load` | Load test | `BASE_URL=<url>` required |
 | `make test-integration` | Full E2E all patterns (slow) | Docker Compose stacks |
@@ -31,6 +31,7 @@ Use `make test` as inner loop; builds coverage report.
 | P4 | None | Manager HTTP + **gRPC server**, 1 worker, API |
 | P5 | NATS, Postgres | Manager, 1 worker, API (testcontainers) |
 | P6 | NATS, Postgres | Manager, 1 worker, API (testcontainers) |
+| P7 | NATS, Postgres | Manager (HTTP + **mTLS listener**), worker with **ephemeral PKI**, API |
 
 P5/P6 use `testcontainers-go`: `tcnats.Run`, `tcpostgres.Run` with `BasicWaitStrategies()`. All cleanup via `t.Cleanup`.
 
@@ -52,6 +53,9 @@ P5/P6 use `testcontainers-go`: `tcnats.Run`, `tcpostgres.Run` with `BasicWaitStr
 - **P3/P4: `WaitForWorker` mandatory** — Workers register asynchronously; omitting it causes 503 on first `POST /tasks`. ⚠ Do not remove.
 - **`WaitForWorker` waits for completion** — Polls `GET /tasks/<id>` until terminal; ensures worker idle before suite.
 - **NATS: no manual `-js` flag** — `tcnats.Run` enables JetStream by default; explicit flag causes conflicts.
-- **P4: dual listeners** — `NewManager` returns `{Router, GRPCServer}`; start both on random ports.
+- **P4/P7: dual listeners** — `NewManager` returns `{Router, BootstrapRouter, ...}`; start both on random ports. ⚠ P7 bootstrap on TLS listener.
+- **P7: ephemeral PKI** — Integration test generates all certs in-process (no temp files). `generateTestPKI()` creates CA, server cert, and device cert with specified CN.
+- **P7: token renewal timing** — Token TTL deliberately short (4s) in test; `TokenRenewal` subtest waits 5s to trigger renewal. ⚠ Do not change timing without verifying token expiry is hit.
+- **P7: revocation is per-subtest** — `Revocation` revokes device CN; `TokenRenewal` uses a separate device to test renewal independently.
 - **`make test-e2e` requires running API** — Default `BASE_URL=http://localhost:8080`.
-- **AWS/Kafka in `test-integration` only** — `make test` uses NATS for P6; brokers via docker-compose + `BROKER=` env.
+- **AWS/Kafka in `test-integration` only** — `make test` uses NATS for P6/P7; brokers via docker-compose + `BROKER=` env.
