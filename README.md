@@ -11,14 +11,14 @@ A project exploring various work-distribution patterns with progressively increa
 
 ## Layered Architecture Overview
 
-All patterns share the same HTTP API and Manager, with **one variation point**: the **Transport Layer** (`contracts.TaskDispatcher` / `contracts.TaskConsumer`).
+All patterns share the same HTTP API and Manager, with **one variation point**: the **Transport Layer** (`contracts.TaskDispatcher` / `contracts.TaskConsumer`). P7 adds a second variation: **how workers discover their runtime configuration**.
 
 ```mermaid
 graph LR
     Browser["Browser"]
     API["API Layer<br/>(shared/api · shared/sse)"]
     Manager["Manager Layer<br/>(shared/manager · shared/store)"]
-    Transport["⚡ Transport<br/>VARIATION POINT<br/>P1: Channel<br/>P2: REST · P3: WS · P4: gRPC<br/>P5: NATS · P6: gocloud"]
+    Transport["⚡ Transport<br/>VARIATION POINT<br/>P1: Channel<br/>P2: REST · P3: WS · P4: gRPC<br/>P5: NATS · P6: gocloud · P7: gocloud + mTLS bootstrap"]
     Workers["Worker Layer<br/>(shared/executor)"]
 
     Browser <-->|"HTTP · SSE"| API
@@ -55,6 +55,7 @@ All patterns expose an **identical HTTP API** and **identical HTMX frontend**. T
 | **p04: Streaming-gRPC** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gRPC bidirectional stream | gRPC bidirectional stream | SSE client on Manager |
 | **p05: Brokered-NATS** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | NATS JetStream `tasks.new` | NATS `worker.events.*` (queue group) | `NATSBridge` (fan-out to all APIs) |
 | **p06: Cloud-PubSub** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to all APIs) |
+| **p07: Bootstrap-mTLS** | 1 API + 1 Manager (HTTP + mTLS) + N edge workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic (URL discovered at runtime) | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to API) |
 
 ## Pattern Diagrams
 
@@ -148,13 +149,69 @@ graph LR
     Manager <-->|"tasks · events"| Workers
 ```
 
+### P7: Bootstrap-mTLS (Edge Worker Discovery)
+
+**Zero-configuration edge workers:** Workers carry only a device certificate and a bootstrap URL. On startup they perform a one-time mTLS handshake to discover the broker address and receive a short-lived token — no broker config is baked into the worker binary or its deployment manifests. The manager can rotate infrastructure (broker URL, credentials) without touching edge workers.
+
+The manager runs two listeners: a plain HTTP server for the internal task API (same as P6), and a separate **mTLS server** that enforces client certificate authentication at the TLS layer before any handler runs.
+
+#### Bootstrap Handshake
+
+```mermaid
+sequenceDiagram
+    participant W as Edge Worker
+    participant B as Bootstrap mTLS
+    participant K as Broker
+
+    Note over W: Starts with only device cert + bootstrap URL
+
+    W->>B: GET /worker/bootstrap
+    Note right of B: Verifies client cert, checks revocation
+    B-->>W: brokerURL + token + expiresAt
+
+    W->>K: Connect to brokerURL with token
+
+    loop Renew at 80% of TTL
+        W->>B: GET /worker/bootstrap
+        B-->>W: brokerURL + token + expiresAt
+    end
+```
+
+#### Runtime Topology
+
+```mermaid
+graph LR
+    Browser["Browser"]
+    API["API Layer<br/>(API Server · SSE Hub)"]
+    Manager["Manager<br/>(HTTP :8081)"]
+    Bootstrap["Bootstrap Server<br/>(mTLS :8083)"]
+    Broker["Broker<br/>(NATS / Kafka / AWS)"]
+    Workers["Edge Workers<br/>(device cert only)"]
+
+    Browser <-->|"HTTP · SSE"| API
+    API <-->|"HTTP"| Manager
+    Manager <-->|"tasks · events"| Broker
+    Workers -->|"mTLS handshake<br/>(get broker URL + token)"| Bootstrap
+    Workers <-->|"tasks · events<br/>(via discovered broker)"| Broker
+```
+
+#### Security Properties
+
+| Property | Mechanism |
+|---|---|
+| **Worker identity** | X.509 client certificate (CN = device ID); verified by TLS before handler runs |
+| **Revocation** | Runtime deny-list keyed by CN; 403 returned on next bootstrap |
+| **Credential lifetime** | Short-lived HMAC-signed tokens (configurable TTL, default 15 min) |
+| **Token renewal** | Worker re-bootstraps at 80% of remaining TTL; no manual intervention |
+| **Broker config isolation** | Workers never have static broker credentials; all config flows through bootstrap |
+
 ## Prerequisites
 
 ### Runtime Dependencies (Required)
 
 All patterns require:
 - **Go 1.25+**
-- **Docker** and **Docker Compose** (for patterns 2-6)
+- **Docker** and **Docker Compose** (for patterns 2–6; P7 integration test uses testcontainers)
 
 > **Note:** Pattern 4 uses gRPC, but the generated protobuf code is **already checked into the repository** (`patterns/p04/proto/*.pb.go`). You do **not** need to install protoc or any code generators unless you plan to modify the `.proto` file itself.
 
@@ -248,6 +305,22 @@ make run-p6 BROKER=aws
 # open http://localhost:8080
 ```
 
+### Pattern 7: Bootstrap-mTLS (integration test)
+
+P7 does not have a Docker Compose deployment yet — the full end-to-end flow is covered by the in-process integration test, which generates ephemeral PKI material, spins up NATS and Postgres via testcontainers, and exercises the bootstrap handshake, revocation, and token renewal:
+
+```bash
+go test ./patterns/p07/... -v -run TestP7Integration
+```
+
+The three binaries (`p07-manager`, `p07-worker`, `p07-api`) are fully wired and deployable; they read TLS configuration from environment variables and cert files:
+
+| Binary | Key env vars |
+|---|---|
+| `p07-manager` | `BOOTSTRAP_ADDR`, `SERVER_CERT_PATH`, `SERVER_KEY_PATH`, `CA_CERT_PATH`, `TOKEN_SECRET`, `TOKEN_TTL_MINS` |
+| `p07-worker` | `MANAGER_URL` (bootstrap URL), `CERT_PATH`, `KEY_PATH`, `CA_CERT_PATH` |
+| `p07-api` | `MANAGER_URL`, `BROKER_URL` |
+
 ## Testing
 
 ```bash
@@ -285,5 +358,6 @@ patterns/
 ├── p03/          Push-WebSocket: WebSocket dispatch to external workers
 ├── p04/          Streaming-gRPC: gRPC bidirectional streams with protobuf
 ├── p05/          Brokered-NATS: NATS JetStream (queue) + PostgreSQL (store)
-└── p06/          Cloud-PubSub: gocloud.dev abstraction (NATS/Kafka/AWS)
+├── p06/          Cloud-PubSub: gocloud.dev abstraction (NATS/Kafka/AWS)
+└── p07/          Bootstrap-mTLS: edge workers discover broker config via mTLS handshake
 ```
