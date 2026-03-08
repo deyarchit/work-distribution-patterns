@@ -82,6 +82,9 @@ build-all:
 	go build -o bin/p06-api      ./patterns/p06/cmd/api
 	go build -o bin/p06-manager  ./patterns/p06/cmd/manager
 	go build -o bin/p06-worker   ./patterns/p06/cmd/worker
+	go build -o bin/p07-api      ./patterns/p07/cmd/api
+	go build -o bin/p07-manager  ./patterns/p07/cmd/manager
+	go build -o bin/p07-worker   ./patterns/p07/cmd/worker
 
 ## Build all binaries and validate all six patterns end-to-end via Docker Compose
 test-integration: build-all
