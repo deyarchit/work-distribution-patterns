@@ -112,11 +112,11 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (ManagerComponents, erro
 	router.GET("/health", api.Health())
 	router.POST("/tasks", func(c echo.Context) error {
 		var task models.Task
-		if err := c.Bind(&task); err != nil {
+		if bindErr := c.Bind(&task); bindErr != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid task body")
 		}
-		if err := mgr.Submit(c.Request().Context(), task); err != nil {
-			return err
+		if submitErr := mgr.Submit(c.Request().Context(), task); submitErr != nil {
+			return submitErr
 		}
 		return c.JSON(http.StatusAccepted, map[string]string{"id": task.ID})
 	})
