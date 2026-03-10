@@ -3,7 +3,7 @@ package wsinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -56,7 +56,7 @@ func (c *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 
 		if attempt > 0 {
 			backoff := time.Duration(math.Min(float64(attempt)*500, 10000)) * time.Millisecond
-			log.Printf("reconnecting in %s (attempt %d)...", backoff, attempt)
+			slog.Info("Reconnecting", "backoff", backoff, "attempt", attempt)
 			select {
 			case <-ctx.Done():
 				return
@@ -64,13 +64,13 @@ func (c *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 			}
 		}
 
-		log.Printf("connecting to %s", c.apiURL)
+		slog.Info("Connecting to API", "url", c.apiURL)
 		conn, _, err := websocket.DefaultDialer.Dial(c.apiURL, nil)
 		if err != nil {
-			log.Printf("dial error: %v", err)
+			slog.Error("Dial error", "error", err)
 			continue
 		}
-		log.Println("connected to API")
+		slog.Info("Connected to API")
 		attempt = 0
 
 		send := make(chan []byte, 128)
@@ -79,7 +79,7 @@ func (c *WebSocketConsumer) reconnectLoop(ctx context.Context) {
 		c.mu.Unlock()
 
 		if err := c.runConn(ctx, conn, send); err != nil {
-			log.Printf("connection error: %v", err)
+			slog.Error("Connection error", "error", err)
 		}
 
 		c.mu.Lock()
@@ -140,7 +140,7 @@ func (c *WebSocketConsumer) runWritePump(conn *websocket.Conn, send <-chan []byt
 				return
 			}
 			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				log.Printf("write error: %v", err)
+				slog.Error("Write error", "error", err)
 				return
 			}
 		case <-ticker.C:
@@ -197,7 +197,7 @@ func (c *WebSocketConsumer) runConn(ctx context.Context, conn *websocket.Conn, s
 		if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != msgTypeTask {
 			continue
 		}
-		log.Printf("received task %s (%d stages)", msg.Task.ID, len(msg.Task.Stages))
+		slog.Info("Received task", "task_id", msg.Task.ID, "stage_count", len(msg.Task.Stages))
 		select {
 		case c.tasks <- msg.Task:
 		case <-ctx.Done():

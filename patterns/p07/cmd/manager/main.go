@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -33,7 +34,8 @@ type config struct {
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("Fatal error", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -73,14 +75,14 @@ func run() error {
 
 	// Plain-HTTP task API for internal API↔Manager communication.
 	go func() {
-		log.Printf("Pattern 07 Manager (task API) listening on %s [broker=%s]", cfg.Addr, cfg.BrokerURL)
+		slog.Info("Pattern 07 Manager (task API) listening", "addr", cfg.Addr, "broker", cfg.BrokerURL)
 		errCh <- comps.Router.Start(cfg.Addr)
 	}()
 
 	// mTLS bootstrap server for edge worker credential vending.
 	// The listener was created (and ClientAuth enforced) inside NewManager.
 	go func() {
-		log.Printf("Pattern 07 Manager (bootstrap) listening on %s [mTLS]", comps.BootstrapListener.Addr())
+		slog.Info("Pattern 07 Manager (bootstrap) listening", "addr", comps.BootstrapListener.Addr().String())
 		errCh <- comps.BootstrapRouter.Server.Serve(comps.BootstrapListener)
 	}()
 

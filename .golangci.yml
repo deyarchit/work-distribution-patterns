@@ -8,6 +8,10 @@ linters:
         linters:
           - revive
         text: var-naming
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+          - bodyclose
   enable:
     # ── Correctness ──────────────────────────────────────────────────────────
     - errcheck # Enforce: Every function returning an error must have its error checked. Fix: Use 'if err != nil' or explicitly ignore with '_ ='.
@@ -20,6 +24,10 @@ linters:
     - nolintlint # Enforce: Manage linter exclusions. Fix: Ensure //nolint directives are necessary, specific, and explained.
     - bodyclose # Enforce: Prevent resource leaks. Fix: Always 'defer resp.Body.Close()' immediately after checking the error from an HTTP call.
     - durationcheck # Enforce: Correct time math. Fix: Never multiply two time.Duration values together; multiply a duration by a plain integer instead.
+    - forbidigo # Enforce: Forbid the use of certain patterns
+    - sloglint # Enforce: Correct and performant 'slog' usage.
+    - iface # Enforce: Interface design hygiene. Fix: Remove single-method interfaces that duplicate an existing stdlib interface; use the stdlib one instead.
+    - dupl # Enforce: Avoid copy-paste code. Fix: Extract duplicated code blocks into shared functions or generics.
 
     # ── Security & Safety ────────────────────────────────────────────────────
     # - gosec     # Enforce: Detect security issues (SQLi, weak crypto, hardcoded credentials). Fix: Re-enable and remediate findings before shipping.
@@ -53,6 +61,23 @@ linters:
       allow-unused: false # Enforce: Delete '//nolint' comments that no longer suppress anything.
       require-explanation: true # Enforce: Every //nolint must be followed by a reason (e.g. //nolint:errcheck // intentionally ignored because...).
       require-specific: true # Enforce: Bare '//nolint' is forbidden. Fix: Always name the linter being suppressed, e.g. '//nolint:unparam'.
+    forbidigo:
+      forbid:
+        - pattern: ^log\..*$
+          msg: "Use 'log/slog' instead of the standard 'log' package for structured logging."
+        - pattern: ^fmt\.Print.*$
+          msg: "Do not use fmt for logging; use 'log/slog' instead."
+      analyze-types: true # Optional: ensure it catches types correctly
+    sloglint:
+      kv-only: true
+      static-msg: true # Enforce: Static log messages for better aggregation. Fix: Move dynamic data to Attrs.
+      key-naming-case: snake # Enforce: Consistent key casing for log parsers. Fix: Use snake_case for all keys.
+      msg-style: capitalized # Enforce: Sentence-case log messages. Fix: Capitalize the first letter of messages.
+      forbidden-keys: # Enforce: Clean schema for log aggregators. Fix: Remove reserved or redundant keys.
+        - time
+        - level
+        - msg
+        - source
     revive:
       rules:
         # ── Robustness ───────────────────────────────────────────────────────

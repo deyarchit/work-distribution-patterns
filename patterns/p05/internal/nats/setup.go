@@ -1,7 +1,7 @@
 package natsinternal
 
 import (
-	"log"
+	"log/slog"
 
 	"github.com/nats-io/nats.go"
 )
@@ -21,7 +21,7 @@ func SetupJetStream(js nats.JetStreamContext) error {
 		Retention: nats.WorkQueuePolicy,
 	})
 	if err != nil {
-		log.Printf("stream setup: %v (may already exist)", err)
+		slog.Info("Stream setup (may already exist)", "error", err)
 	}
 	return nil
 }

@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net"
+	"os"
 
 	"github.com/kelseyhightower/envconfig"
 
@@ -18,28 +19,35 @@ type config struct {
 func main() {
 	var cfg config
 	if err := envconfig.Process("", &cfg); err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("Config error", "error", err)
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
 
 	r, err := app.NewManager(ctx, app.ManagerConfig{})
 	if err != nil {
-		log.Fatalf("setup: %v", err)
+		slog.Error("Setup error", "error", err)
+		os.Exit(1)
 	}
 
 	grpcLn, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
-		log.Fatalf("grpc listen: %v", err)
+		slog.Error("gRPC listen error", "error", err)
+		os.Exit(1)
 	}
 
 	go func() {
-		log.Printf("gRPC server listening on %s", cfg.GRPCAddr)
+		slog.Info("gRPC server listening", "addr", cfg.GRPCAddr)
 		if err := r.GRPCServer.Serve(grpcLn); err != nil {
-			log.Fatalf("gRPC server failed: %v", err)
+			slog.Error("gRPC server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
-	log.Printf("Pattern 4 (gRPC Streaming) Manager HTTP on %s, gRPC on %s", cfg.HTTPAddr, cfg.GRPCAddr)
-	log.Fatal(r.Router.Start(cfg.HTTPAddr))
+	slog.Info("Pattern 4 (gRPC Streaming) Manager listening", "http_addr", cfg.HTTPAddr, "grpc_addr", cfg.GRPCAddr)
+	if err := r.Router.Start(cfg.HTTPAddr); err != nil {
+		slog.Error("Server failed", "error", err)
+		os.Exit(1)
+	}
 }

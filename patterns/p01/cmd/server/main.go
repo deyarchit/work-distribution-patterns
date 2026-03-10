@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/kelseyhightower/envconfig"
 
@@ -19,7 +20,8 @@ type config struct {
 func main() {
 	var cfg config
 	if err := envconfig.Process("", &cfg); err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("Config error", "error", err)
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
@@ -30,10 +32,17 @@ func main() {
 		MaxStageDuration: cfg.MaxStageDuration,
 	})
 	if err != nil {
-		log.Fatalf("setup: %v", err)
+		slog.Error("Setup error", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Pattern 1 (Goroutine Pool) listening on %s [workers=%d, queue=%d, maxStage=%dms]",
-		cfg.Addr, cfg.Workers, cfg.QueueSize, cfg.MaxStageDuration)
-	log.Fatal(e.Start(cfg.Addr))
+	slog.Info("Pattern 1 (Goroutine Pool) listening",
+		"addr", cfg.Addr,
+		"workers", cfg.Workers,
+		"queue", cfg.QueueSize,
+		"max_stage_ms", cfg.MaxStageDuration)
+	if err := e.Start(cfg.Addr); err != nil {
+		slog.Error("Server failed", "error", err)
+		os.Exit(1)
+	}
 }

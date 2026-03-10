@@ -3,7 +3,7 @@ package natsinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	"github.com/nats-io/nats.go"
 
@@ -47,9 +47,9 @@ func (s *NATSConsumer) subscribe(ctx context.Context) {
 		func(msg *nats.Msg) {
 			var task models.Task
 			if err := json.Unmarshal(msg.Data, &task); err != nil {
-				log.Printf("unmarshal task: %v", err)
+				slog.Error("Unmarshal task error", "error", err)
 				if err := msg.Nak(); err != nil {
-					log.Printf("nack error: %v", err)
+					slog.Error("Nack error", "error", err)
 				}
 				return
 			}
@@ -58,7 +58,7 @@ func (s *NATSConsumer) subscribe(ctx context.Context) {
 			select {
 			case s.tasks <- task:
 				if err := msg.Ack(); err != nil {
-					log.Printf("ack error: %v", err)
+					slog.Error("Ack error", "error", err)
 				}
 			case <-ctx.Done():
 			}
@@ -67,17 +67,17 @@ func (s *NATSConsumer) subscribe(ctx context.Context) {
 		nats.ManualAck(),
 	)
 	if err != nil {
-		log.Printf("subscribe error: %v", err)
+		slog.Error("Subscribe error", "error", err)
 		return
 	}
 	defer func() {
 		if err := sub.Unsubscribe(); err != nil {
-			log.Printf("unsubscribe error: %v", err)
+			slog.Error("Unsubscribe error", "error", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down worker")
+	slog.Info("Shutting down worker")
 }
 
 // Receive blocks until a task is available or ctx is cancelled.

@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/kelseyhightower/envconfig"
 
@@ -18,7 +19,8 @@ type config struct {
 func main() {
 	var cfg config
 	if err := envconfig.Process("", &cfg); err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("Config error", "error", err)
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
@@ -28,9 +30,13 @@ func main() {
 		DatabaseURL: cfg.DatabaseURL,
 	})
 	if err != nil {
-		log.Fatalf("setup: %v", err)
+		slog.Error("Setup error", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Pattern 5 (Queue-and-Store) Manager listening on %s", cfg.Addr)
-	log.Fatal(e.Start(cfg.Addr))
+	slog.Info("Pattern 5 (Queue-and-Store) Manager listening", "addr", cfg.Addr)
+	if err := e.Start(cfg.Addr); err != nil {
+		slog.Error("Server failed", "error", err)
+		os.Exit(1)
+	}
 }

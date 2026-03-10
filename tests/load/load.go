@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,8 +84,7 @@ func main() {
 	stages := flag.Int("stages", 3, "Stages per task")
 	flag.Parse()
 
-	log.Printf("Load test: url=%s rate=%.1f/s duration=%s stages=%d",
-		*url, *rate, *duration, *stages)
+	slog.Info("Load test starting", "url", *url, "rate", *rate, "duration", *duration, "stages", *stages)
 
 	interval := time.Duration(float64(time.Second) / *rate)
 	deadline := time.Now().Add(*duration)
@@ -107,8 +107,10 @@ func main() {
 
 	// Wait up to 120s for tasks to complete (server configures stage duration)
 	pollTimeout := 120 * time.Second
-	log.Printf("Submitted %d tasks (%d failed submissions). Waiting up to %s for completion...",
-		atomic.LoadInt64(&submitted), atomic.LoadInt64(&failed), pollTimeout)
+	slog.Info("Waiting for task completion",
+		"submitted", atomic.LoadInt64(&submitted),
+		"failed_submissions", atomic.LoadInt64(&failed),
+		"poll_timeout", pollTimeout)
 
 	pollDeadline := time.Now().Add(pollTimeout)
 	mu.Lock()
@@ -127,11 +129,15 @@ func main() {
 		pct = float64(comp) / float64(total) * 100
 	}
 
-	log.Printf("Results: submitted=%d completed=%d failed_submit=%d completion=%.1f%%",
-		total, comp, atomic.LoadInt64(&failed), pct)
+	slog.Info("Load test results",
+		"submitted", total,
+		"completed", comp,
+		"failed_submit", atomic.LoadInt64(&failed),
+		"completion_pct", pct)
 
 	if pct < 95.0 {
-		log.Fatalf("FAIL: completion %.1f%% < 95%% threshold", pct)
+		slog.Error("Completion below threshold", "completion_pct", pct, "threshold", 95.0)
+		os.Exit(1)
 	}
-	log.Println("PASS")
+	slog.Info("Load test passed")
 }

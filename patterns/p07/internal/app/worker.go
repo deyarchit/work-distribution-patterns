@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -38,15 +38,15 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	// Initial bootstrap: discover broker URL and receive a short-lived token.
 	resp, err := doBootstrapWithRetry(ctx, httpClient, cfg.BootstrapURL)
 	if err != nil {
-		log.Printf("p07 worker: initial bootstrap failed: %v", err)
+		slog.Error("Initial bootstrap failed", "error", err)
 		return
 	}
-	log.Printf("p07 worker: bootstrapped [broker=%s expires=%s]", resp.BrokerURL, resp.ExpiresAt.Format(time.RFC3339))
+	slog.Info("Bootstrapped", "broker", resp.BrokerURL, "expires_at", resp.ExpiresAt.Format(time.RFC3339))
 
 	// Open broker resources using the discovered URL.
 	tasksSub, eventsTopic, err := pubsubinternal.OpenWorkerResources(ctx, resp.BrokerURL)
 	if err != nil {
-		log.Printf("p07 worker: pubsub setup: %v", err)
+		slog.Error("Pubsub setup error", "error", err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	defer consumer.Shutdown(ctx)
 
 	if err := consumer.Connect(ctx); err != nil {
-		log.Printf("p07 worker: connect: %v", err)
+		slog.Error("Connect error", "error", err)
 		return
 	}
 
@@ -74,15 +74,16 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 
 			newResp, err := doBootstrapWithRetry(ctx, httpClient, cfg.BootstrapURL)
 			if err != nil {
-				log.Printf("p07 worker: re-bootstrap failed (will retry next cycle): %v", err)
+				slog.Error("Re-bootstrap failed, will retry next cycle", "error", err)
 				continue
 			}
 
 			if newResp.BrokerURL != current.BrokerURL {
-				log.Printf("p07 worker: broker URL changed [old=%s new=%s] — reconnect required",
-					current.BrokerURL, newResp.BrokerURL)
+				slog.Info("Broker URL changed, reconnect required",
+					"old_broker", current.BrokerURL,
+					"new_broker", newResp.BrokerURL)
 			} else {
-				log.Printf("p07 worker: token renewed [expires=%s]", newResp.ExpiresAt.Format(time.RFC3339))
+				slog.Info("Token renewed", "expires_at", newResp.ExpiresAt.Format(time.RFC3339))
 			}
 
 			current = newResp
@@ -125,7 +126,7 @@ func doBootstrapWithRetry(ctx context.Context, client *http.Client, bootstrapURL
 			return resp, nil
 		}
 		lastErr = err
-		log.Printf("p07 worker: bootstrap attempt %d/5 failed: %v", attempt+1, err)
+		slog.Warn("Bootstrap attempt failed", "attempt", attempt+1, "total", 5, "error", err)
 	}
 	return bootstrap.BootstrapResponse{}, fmt.Errorf("bootstrap failed after 5 attempts: %w", lastErr)
 }

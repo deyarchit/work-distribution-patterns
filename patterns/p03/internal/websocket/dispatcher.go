@@ -3,7 +3,7 @@ package wsinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -65,7 +65,7 @@ func (p *WebSocketDispatcher) Register(conn *websocket.Conn) {
 	p.mu.Lock()
 	p.workers = append(p.workers, wc)
 	p.mu.Unlock()
-	log.Printf("worker %s connected", wc.id)
+	slog.Info("Worker connected", "worker_id", wc.id)
 	go wc.writePump()
 	go wc.readPump()
 }
@@ -161,7 +161,7 @@ func (wc *workerConn) readPump() {
 		wc.hub.remove(wc)
 		close(wc.send)
 		_ = wc.conn.Close()
-		log.Printf("worker %s disconnected", wc.id)
+		slog.Info("Worker disconnected", "worker_id", wc.id)
 	}()
 
 	wc.conn.SetReadLimit(64 * 1024)
@@ -175,7 +175,7 @@ func (wc *workerConn) readPump() {
 		_, raw, err := wc.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Printf("worker %s read error: %v", wc.id, err)
+				slog.Error("Worker read error", "worker_id", wc.id, "error", err)
 			}
 			return
 		}

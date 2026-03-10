@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	pubsubinternal "work-distribution-patterns/patterns/p06/internal/pubsub"
@@ -20,7 +20,7 @@ type WorkerConfig struct {
 func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	tasksSub, eventsTopic, err := pubsubinternal.OpenWorkerResources(ctx, cfg.BrokerURL)
 	if err != nil {
-		log.Printf("p06 worker: pubsub setup: %v", err)
+		slog.Error("Pubsub setup error", "error", err)
 		return
 	}
 
@@ -30,7 +30,7 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	if err := consumer.Connect(ctx); err != nil {
-		log.Printf("p06 worker: connect: %v", err)
+		slog.Error("Connect error", "error", err)
 		return
 	}
 

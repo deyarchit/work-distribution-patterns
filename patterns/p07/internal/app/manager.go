@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -169,17 +169,17 @@ func bootstrapHandler(brokerURL string, tokener *bootstrap.Tokener, revocation *
 		deviceCN := cert.Subject.CommonName
 
 		if revocation.IsRevoked(deviceCN) {
-			log.Printf("p07 bootstrap: rejected revoked device cn=%s", deviceCN)
+			slog.Info("Bootstrap rejected revoked device", "device_cn", deviceCN)
 			return echo.NewHTTPError(http.StatusForbidden, "device revoked")
 		}
 
 		token, expiresAt, err := tokener.Issue(deviceCN)
 		if err != nil {
-			log.Printf("p07 bootstrap: token issue error cn=%s: %v", deviceCN, err)
+			slog.Error("Token issue error", "device_cn", deviceCN, "error", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "token vending failed")
 		}
 
-		log.Printf("p07 bootstrap: issued token cn=%s broker=%s expires=%s", deviceCN, brokerURL, expiresAt.Format(time.RFC3339))
+		slog.Info("Bootstrap token issued", "device_cn", deviceCN, "broker", brokerURL, "expires_at", expiresAt.Format(time.RFC3339))
 
 		return c.JSON(http.StatusOK, bootstrap.BootstrapResponse{
 			BrokerURL: brokerURL,

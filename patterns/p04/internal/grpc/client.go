@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 
 	pb "work-distribution-patterns/patterns/p04/proto"
 	"work-distribution-patterns/shared/models"
@@ -49,7 +49,7 @@ func (c *Client) Get(ctx context.Context, id string) (models.Task, bool) {
 		TaskId: id,
 	})
 	if err != nil {
-		log.Printf("Error getting task %s: %v", id, err)
+		slog.Error("Get task error", "task_id", id, "error", err)
 		return models.Task{}, false
 	}
 
@@ -64,7 +64,7 @@ func (c *Client) Get(ctx context.Context, id string) (models.Task, bool) {
 func (c *Client) List(ctx context.Context) []models.Task {
 	resp, err := c.client.List(ctx, &pb.ListRequest{})
 	if err != nil {
-		log.Printf("Error listing tasks: %v", err)
+		slog.Error("List tasks error", "error", err)
 		return nil
 	}
 
@@ -101,7 +101,7 @@ func (c *Client) Subscribe(ctx context.Context, taskID string) (<-chan models.Ta
 				return
 			}
 			if err != nil {
-				log.Printf("Error receiving event: %v", err)
+				slog.Error("Receive event error", "error", err)
 				return
 			}
 

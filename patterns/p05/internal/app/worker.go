@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -25,14 +25,14 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 		nats.RetryOnFailedConnect(true),
 	)
 	if err != nil {
-		log.Printf("p05 worker: nats connect: %v", err)
+		slog.Error("NATS connect error", "error", err)
 		return
 	}
 	defer nc.Close()
 
 	js, err := nc.JetStream()
 	if err != nil {
-		log.Printf("p05 worker: jetstream: %v", err)
+		slog.Error("JetStream error", "error", err)
 		return
 	}
 
@@ -42,7 +42,7 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	if err := consumer.Connect(ctx); err != nil {
-		log.Printf("p05 worker: connect: %v", err)
+		slog.Error("Connect error", "error", err)
 		return
 	}
 

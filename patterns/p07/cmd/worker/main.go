@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -29,7 +30,8 @@ type config struct {
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("Fatal error", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -47,7 +49,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("Pattern 07 Worker starting [bootstrap=%s]", cfg.ManagerURL)
+	slog.Info("Pattern 07 Worker starting", "bootstrap_url", cfg.ManagerURL)
 	health.StartServer(ctx, cfg.HealthAddr)
 
 	app.RunWorker(ctx, app.WorkerConfig{
