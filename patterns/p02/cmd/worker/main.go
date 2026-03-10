@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -21,13 +22,14 @@ type config struct {
 func main() {
 	var cfg config
 	if err := envconfig.Process("", &cfg); err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("Config error", "error", err)
+		os.Exit(1)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("Pattern 2 (REST Polling) Worker connecting to %s", cfg.ManagerURL)
+	slog.Info("Pattern 2 (REST Polling) Worker connecting", "manager_url", cfg.ManagerURL)
 	health.StartServer(ctx, cfg.HealthAddr)
 
 	app.RunWorker(ctx, app.WorkerConfig{

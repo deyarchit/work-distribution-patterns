@@ -3,7 +3,7 @@ package pubsubinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
@@ -37,7 +37,7 @@ func (c *PubSubConsumer) Receive(ctx context.Context) (models.Task, error) {
 
 	var task models.Task
 	if err := json.Unmarshal(msg.Body, &task); err != nil {
-		log.Printf("unmarshal task error: %v", err)
+		slog.Error("Unmarshal task error", "error", err)
 		msg.Ack()
 		return c.Receive(ctx)
 	}

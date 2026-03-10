@@ -2,7 +2,7 @@ package health
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -30,9 +30,9 @@ func StartServer(ctx context.Context, addr string) {
 	}
 
 	go func() {
-		log.Printf("Health check server listening on %s", addr)
+		slog.Info("Health check server listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("Health check server error: %v", err)
+			slog.Error("Health check server error", "error", err)
 		}
 	}()
 
@@ -41,7 +41,7 @@ func StartServer(ctx context.Context, addr string) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("Health check server shutdown error: %v", err)
+			slog.Error("Health check server shutdown error", "error", err)
 		}
 	}()
 }

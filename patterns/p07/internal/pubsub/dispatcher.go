@@ -3,7 +3,7 @@ package pubsubinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	dispatch "work-distribution-patterns/shared/contracts"
 	"work-distribution-patterns/shared/models"
@@ -40,13 +40,13 @@ func (d *PubSubDispatcher) receiveLoop(ctx context.Context) {
 	for {
 		msg, err := d.eventsSub.Receive(ctx)
 		if err != nil {
-			log.Printf("pubsub receive loop exit: %v", err)
+			slog.Info("Pubsub receive loop exit", "error", err)
 			return
 		}
 
 		var ev models.TaskEvent
 		if err := json.Unmarshal(msg.Body, &ev); err != nil {
-			log.Printf("unmarshal worker event: %v", err)
+			slog.Error("Unmarshal worker event error", "error", err)
 			msg.Ack()
 			continue
 		}
@@ -82,7 +82,7 @@ func (d *PubSubDispatcher) Dispatch(ctx context.Context, task models.Task) error
 		Body:     body,
 		Metadata: map[string]string{"task_id": task.ID},
 	}); err != nil {
-		log.Printf("pubsub dispatch error: %v", err)
+		slog.Error("Pubsub dispatch error", "error", err)
 		return err
 	}
 	return nil

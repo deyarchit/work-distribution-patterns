@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/kelseyhightower/envconfig"
 
@@ -18,7 +19,8 @@ type config struct {
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("Fatal error", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -39,6 +41,6 @@ func run() error {
 		return fmt.Errorf("setup: %w", err)
 	}
 
-	log.Printf("Pattern 06 (Cloud-Agnostic) Manager listening on %s [broker=%s]", cfg.Addr, cfg.BrokerURL)
+	slog.Info("Pattern 06 (Cloud-Agnostic) Manager listening", "addr", cfg.Addr, "broker", cfg.BrokerURL)
 	return e.Start(cfg.Addr)
 }

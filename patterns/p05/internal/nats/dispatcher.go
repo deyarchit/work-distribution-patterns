@@ -3,7 +3,7 @@ package natsinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	"github.com/nats-io/nats.go"
 
@@ -65,7 +65,7 @@ func (b *NATSDispatcher) Dispatch(_ context.Context, task models.Task) error {
 		return err
 	}
 	if _, err := b.js.Publish("tasks.new", payload); err != nil {
-		log.Printf("dispatch error: %v", err)
+		slog.Error("Dispatch error", "error", err)
 		return err
 	}
 	return nil

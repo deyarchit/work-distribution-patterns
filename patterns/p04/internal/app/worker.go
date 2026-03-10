@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	grpcinternal "work-distribution-patterns/patterns/p04/internal/grpc"
@@ -21,14 +21,14 @@ func RunWorker(ctx context.Context, cfg WorkerConfig) {
 	consumer := grpcinternal.NewConsumer(cfg.ManagerGRPCAddr)
 	defer func() {
 		if err := consumer.Close(); err != nil {
-			log.Printf("p04 worker: close consumer: %v", err)
+			slog.Error("Close consumer error", "error", err)
 		}
 	}()
 
 	exec := &executor.Executor{MaxStageDuration: time.Duration(cfg.MaxStageDuration) * time.Millisecond}
 
 	if err := consumer.Connect(ctx); err != nil {
-		log.Printf("p04 worker: connect: %v", err)
+		slog.Error("Connect error", "error", err)
 		return
 	}
 

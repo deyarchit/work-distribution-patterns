@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -42,7 +42,7 @@ func (c *Consumer) Connect(ctx context.Context) error {
 	// Retry loop with backoff
 	for {
 		if err := c.connect(ctx); err != nil {
-			log.Printf("Failed to connect to manager: %v, retrying in 2s...", err)
+			slog.Error("Failed to connect to manager, retrying", "error", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -78,7 +78,7 @@ func (c *Consumer) connect(ctx context.Context) error {
 	stream, err := c.client.Connect(ctx)
 	if err != nil {
 		if closeErr := conn.Close(); closeErr != nil {
-			log.Printf("error closing connection: %v", closeErr)
+			slog.Error("Error closing connection", "error", closeErr)
 		}
 		return err
 	}
@@ -86,7 +86,7 @@ func (c *Consumer) connect(ctx context.Context) error {
 	c.stream = stream
 	c.connected = true
 
-	log.Printf("Connected to manager at %s", c.managerAddr)
+	slog.Info("Connected to manager", "addr", c.managerAddr)
 	return nil
 }
 
@@ -98,7 +98,7 @@ func (c *Consumer) receiveLoop(ctx context.Context) {
 		c.mu.Unlock()
 
 		if stream == nil {
-			log.Printf("Stream is nil, reconnecting...")
+			slog.Info("Stream is nil, reconnecting")
 			if err := c.Connect(ctx); err != nil {
 				return
 			}
@@ -107,7 +107,7 @@ func (c *Consumer) receiveLoop(ctx context.Context) {
 
 		task, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Printf("Stream closed by manager, reconnecting...")
+			slog.Info("Stream closed by manager, reconnecting")
 			c.mu.Lock()
 			c.connected = false
 			c.mu.Unlock()
@@ -117,7 +117,7 @@ func (c *Consumer) receiveLoop(ctx context.Context) {
 			continue
 		}
 		if err != nil {
-			log.Printf("Error receiving task: %v, reconnecting...", err)
+			slog.Error("Error receiving task, reconnecting", "error", err)
 			c.mu.Lock()
 			c.connected = false
 			c.mu.Unlock()
@@ -129,7 +129,7 @@ func (c *Consumer) receiveLoop(ctx context.Context) {
 
 		// Convert and queue task
 		modelTask := ProtoToTask(task)
-		log.Printf("Received task %s", modelTask.ID)
+		slog.Info("Received task", "task_id", modelTask.ID)
 
 		select {
 		case c.taskQueue <- modelTask:
@@ -157,13 +157,13 @@ func (c *Consumer) Emit(ctx context.Context, event models.TaskEvent) error {
 	c.mu.Unlock()
 
 	if !connected || stream == nil {
-		log.Printf("Not connected, cannot emit event")
+		slog.Warn("Not connected, cannot emit event")
 		return errNotConnected
 	}
 
 	protoEvent := EventToProto(event)
 	if err := stream.Send(protoEvent); err != nil {
-		log.Printf("Failed to emit event: %v", err)
+		slog.Error("Failed to emit event", "error", err)
 		c.mu.Lock()
 		c.connected = false
 		c.mu.Unlock()
@@ -180,7 +180,7 @@ func (c *Consumer) Close() error {
 
 	if c.stream != nil {
 		if err := c.stream.CloseSend(); err != nil {
-			log.Printf("Error closing stream: %v", err)
+			slog.Error("Error closing stream", "error", err)
 		}
 	}
 

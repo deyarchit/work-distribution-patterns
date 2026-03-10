@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"sync"
 
 	pb "work-distribution-patterns/patterns/p04/proto"
@@ -84,14 +84,14 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 
 				// Send task to worker
 				if err := stream.Send(TaskToProto(task)); err != nil {
-					log.Printf("Failed to send task %s to worker %s: %v", task.ID, workerID, err)
+					slog.Error("Failed to send task to worker", "task_id", task.ID, "worker_id", workerID, "error", err)
 					// Worker failed, re-queue task and remove worker
 					s.pendingTasks <- task
 					s.removeWorker(workerID)
 					continue
 				}
 
-				log.Printf("Dispatched task %s to worker %s", task.ID, workerID)
+				slog.Info("Dispatched task to worker", "task_id", task.ID, "worker_id", workerID)
 			}
 		}
 	}
@@ -101,7 +101,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 func (s *Server) eventBroadcastLoop(ctx context.Context) {
 	eventChan, err := s.eventBus.Subscribe(ctx)
 	if err != nil {
-		log.Printf("Failed to subscribe to event bus: %v", err)
+		slog.Error("Failed to subscribe to event bus", "error", err)
 		return
 	}
 
@@ -128,7 +128,7 @@ func (s *Server) removeWorker(workerID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.workerStreams, workerID)
-	log.Printf("Worker %s removed", workerID)
+	slog.Info("Worker removed", "worker_id", workerID)
 }
 
 // WorkDistribution.Connect - bidirectional stream for worker connection
@@ -141,7 +141,7 @@ func (s *Server) Connect(stream pb.WorkDistribution_ConnectServer) error {
 	s.workerStreams[workerID] = stream
 	s.mu.Unlock()
 
-	log.Printf("Worker %s connected", workerID)
+	slog.Info("Worker connected", "worker_id", workerID)
 
 	// Signal worker is available
 	s.availableQueue <- workerID
@@ -163,7 +163,7 @@ func (s *Server) Connect(stream pb.WorkDistribution_ConnectServer) error {
 		select {
 		case s.workerEvents <- modelEvent:
 		default:
-			log.Printf("Worker event queue full, dropping event")
+			slog.Warn("Worker event queue full, dropping event")
 		}
 
 		// For terminal events, mark worker as available again

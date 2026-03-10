@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"html/template"
-	"log"
+	"log/slog"
 
 	"github.com/labstack/echo/v4"
 
@@ -37,13 +37,13 @@ func NewAPI(ctx context.Context, cfg APIConfig) (*echo.Echo, error) {
 		for {
 			msg, recvErr := eventsSub.Receive(ctx)
 			if recvErr != nil {
-				log.Printf("p07 api: events subscription error: %v", recvErr)
+				slog.Error("Events subscription error", "error", recvErr)
 				return
 			}
 
 			var ev models.TaskEvent
 			if unmarshalErr := json.Unmarshal(msg.Body, &ev); unmarshalErr != nil {
-				log.Printf("p07 api: unmarshal event error: %v", unmarshalErr)
+				slog.Error("Unmarshal event error", "error", unmarshalErr)
 				msg.Ack()
 				continue
 			}

@@ -3,7 +3,7 @@ package pubsubinternal
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	"work-distribution-patterns/shared/models"
 
@@ -24,7 +24,7 @@ func NewPubSubEventBridge(topic *pubsub.Topic) *PubSubEventBridge {
 func (b *PubSubEventBridge) Publish(event models.TaskEvent) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("pubsub event bridge marshal error: %v", err)
+		slog.Error("Event bridge marshal error", "error", err)
 		return
 	}
 
@@ -36,6 +36,6 @@ func (b *PubSubEventBridge) Publish(event models.TaskEvent) {
 		},
 	})
 	if err != nil {
-		log.Printf("pubsub event bridge publish error: %v", err)
+		slog.Error("Event bridge publish error", "error", err)
 	}
 }
