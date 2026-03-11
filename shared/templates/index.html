@@ -257,6 +257,8 @@
     function handleProgress(ev) {
       const card = document.getElementById('task-' + ev.taskID);
       if (!card) return;
+      const progress = card.querySelector('.task-progress');
+      if (progress) progress.style.display = '';
       const bar = card.querySelector('.task-progress-bar');
       if (bar) bar.style.width = ev.progress + '%';
       const label = card.querySelector('.stage-label');
@@ -269,9 +271,9 @@
       card.className = 'task-card ' + ev.status;
       const badge = card.querySelector('.badge');
       if (badge) { badge.className = 'badge ' + ev.status; badge.textContent = ev.status; }
-      if (ev.status === 'completed') {
-        const bar = card.querySelector('.task-progress-bar');
-        if (bar) bar.style.width = '100%';
+      if (ev.status === 'completed' || ev.status === 'failed') {
+        const progress = card.querySelector('.task-progress');
+        if (progress) progress.style.display = 'none';
         const label = card.querySelector('.stage-label');
         if (label) label.textContent = '';
       }
