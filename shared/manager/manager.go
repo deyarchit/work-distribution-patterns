@@ -98,6 +98,10 @@ func (m *Manager) runEventLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
+		// Enrich with UserID from store — workers don't carry user identity.
+		if task, ok := m.store.Get(event.TaskID); ok {
+			event.UserID = task.UserID
+		}
 		if event.Type == models.EventTaskStatus {
 			status := models.TaskStatus(event.Status)
 			if status == models.TaskCompleted || status == models.TaskFailed {

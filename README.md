@@ -33,8 +33,8 @@ Three invariant layers with fixed responsibilities. Only the transport between M
 
 | Layer | Responsibility |
 |---|---|
-| **API** | Accepts tasks from the client. Submits to the Manager synchronously — only returns success after the Manager acknowledges. Streams progress to the client via SSE. Surfaces task status as reported by the Manager. |
-| **Manager** | Stores task state. Dispatches tasks to workers (fire-and-forget — no pickup guarantee). Receives progress and results from workers. Updates state and republishes events to the API layer. |
+| **API** | Accepts tasks from the client. Submits to the Manager synchronously — only returns success after the Manager acknowledges. Streams progress via a **user-scoped SSE connection** (one `EventSource` per browser session, routed by user ID; demuxed by task ID on the client). Surfaces task status as reported by the Manager. |
+| **Manager** | Stores task state. Dispatches tasks to workers (fire-and-forget — no pickup guarantee). Receives progress and results from workers. Enriches events with the submitting user's ID, then republishes to the API layer. |
 | **Worker** | Executes tasks. Emits progress events and final status back to the Manager. Nothing else. |
 
 **Invariants that hold across all patterns:**
@@ -42,6 +42,7 @@ Three invariant layers with fixed responsibilities. Only the transport between M
 - The API submit is synchronous: the Manager must acknowledge before the API responds to the client.
 - The Manager does not wait for a worker to pick up a task. Dispatch is fire-and-forget.
 - The Manager always republishes worker events before the API layer delivers them to the client (ensures state is consistent before SSE reaches the browser).
+- User identity flows from the client: a UUID cookie (minted on first visit) for browsers, or an `X-User-ID` header for API clients. The Manager stamps this ID onto every outbound event so the SSE layer can route to the correct subscriber.
 
 ## Patterns
 
@@ -50,9 +51,9 @@ All patterns expose an **identical HTTP API** and **identical HTMX frontend**. T
 | Pattern | Topology | Client ↔ API | API ↔ Manager | Manager → Worker (⚡ varies) | Worker → Manager (⚡ varies) | Manager → API (events) |
 |---|---|---|---|---|---|---|
 | **p01: Local-Channels** | Single process | HTTP · SSE | In-process call | Buffered channel | `MemoryBridge` publish | `MemoryBridge` subscribe |
-| **p02: Pull-REST** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | Worker polls `GET /work/next` | `POST /work/events` | SSE client on Manager |
-| **p03: Push-WebSocket** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | WebSocket push to idle worker | WebSocket emit | SSE client on Manager |
-| **p04: Streaming-gRPC** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gRPC bidirectional stream | gRPC bidirectional stream | SSE client on Manager |
+| **p02: Pull-REST** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | Worker polls `GET /work/next` | `POST /work/events` | API subscribes to Manager `GET /events` (`BridgeStream` → `MemoryBridge`) |
+| **p03: Push-WebSocket** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | WebSocket push to idle worker | WebSocket emit | API subscribes to Manager `GET /events` (`BridgeStream` → `MemoryBridge`) |
+| **p04: Streaming-gRPC** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gRPC bidirectional stream | gRPC bidirectional stream | API subscribes to Manager `GET /events` (`BridgeStream` → `MemoryBridge`) |
 | **p05: Brokered-NATS** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | NATS JetStream `tasks.new` | NATS `worker.events.*` (queue group) | `NATSBridge` (fan-out to all APIs) |
 | **p06: Cloud-PubSub** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to all APIs) |
 | **p07: Bootstrap-mTLS** | 1 API + 1 Manager (HTTP + mTLS) + N edge workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic (URL discovered at runtime) | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to API) |
@@ -65,7 +66,7 @@ All patterns expose an **identical HTTP API** and **identical HTMX frontend**. T
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager Layer<br/>(Manager · ChannelDispatcher)"]
     Workers["Worker Layer<br/>(goroutine pool)"]
 
@@ -75,47 +76,50 @@ graph LR
 ```
 
 ### P2: Pull-REST (REST Polling)
-**Separate processes:** API and Manager on different ports. Workers poll Manager for tasks.
+**Separate processes:** API and Manager on different ports. Workers poll Manager for tasks. API subscribes to Manager's `BridgeStream` endpoint for event relay.
 
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager Layer<br/>(Manager · RESTDispatcher)"]
     Workers["Worker Layer<br/>(polling workers)"]
 
     Browser <-->|"HTTP · SSE"| API
-    API <-->|"HTTP"| Manager
+    API -->|"HTTP (tasks)"| Manager
+    Manager -->|"events (BridgeStream)"| API
     Manager <-->|"GET /work/next<br/>POST /work/events"| Workers
 ```
 
 ### P3: Push-WebSocket (WebSocket Hub)
-**Separate processes with persistent connections:** Manager owns WebSocket hub, pushes tasks to workers.
+**Separate processes with persistent connections:** Manager owns WebSocket hub, pushes tasks to workers. API subscribes to Manager's `BridgeStream` endpoint for event relay.
 
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager Layer<br/>(Manager · WebSocketDispatcher)"]
     Workers["Worker Layer<br/>(workers)"]
 
     Browser <-->|"HTTP · SSE"| API
-    API <-->|"HTTP"| Manager
+    API -->|"HTTP (tasks)"| Manager
+    Manager -->|"events (BridgeStream)"| API
     Manager <-->|"WebSocket (tasks · events)"| Workers
 ```
 
 ### P4: Streaming-gRPC (gRPC Bidirectional)
-**Separate processes with bidirectional streams:** Manager runs dual listeners (HTTP + gRPC) for high-performance streaming.
+**Separate processes with bidirectional streams:** Manager runs dual listeners (HTTP + gRPC) for high-performance streaming. API subscribes to Manager's `BridgeStream` endpoint for event relay.
 
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager Layer<br/>(Manager · gRPCDispatcher)"]
     Workers["Worker Layer<br/>(workers)"]
 
     Browser <-->|"HTTP · SSE"| API
-    API <-->|"HTTP"| Manager
+    API -->|"HTTP (tasks)"| Manager
+    Manager -->|"events (BridgeStream)"| API
     Manager <-->|"gRPC bidi (tasks · events)"| Workers
 ```
 
@@ -125,7 +129,7 @@ graph LR
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager Layer<br/>(Manager · PostgreSQL · NATS JetStream)"]
     Workers["Worker Layer"]
 
@@ -140,7 +144,7 @@ graph LR
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager Layer<br/>(Manager · PostgreSQL · <br/>Broker(NATS | Kafka | AWS))"]
     Workers["Worker Layer"]
 
@@ -182,7 +186,7 @@ sequenceDiagram
 ```mermaid
 graph LR
     Browser["Browser"]
-    API["API Layer<br/>(API Server · SSE Hub)"]
+    API["API Layer<br/>(API Server · SSE)"]
     Manager["Manager<br/>(HTTP :8081)"]
     Bootstrap["Bootstrap Server<br/>(mTLS :8083)"]
     Broker["Broker<br/>(NATS / Kafka / AWS)"]

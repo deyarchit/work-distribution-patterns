@@ -31,6 +31,7 @@ func TaskToProto(t models.Task) *pb.Task {
 		Stages:    stages,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
+		UserId:    t.UserID,
 	}
 }
 
@@ -59,6 +60,7 @@ func ProtoToTask(pt *pb.Task) models.Task {
 		ID:           pt.Id,
 		Name:         pt.Title,
 		Status:       models.TaskStatus(pt.Status),
+		UserID:       pt.UserId,
 		SubmittedAt:  createdAt,
 		DispatchedAt: dispatchedAt,
 		CompletedAt:  completedAt,
@@ -72,6 +74,7 @@ func EventToProto(e models.TaskEvent) *pb.TaskEvent {
 		TaskId:    e.TaskID,
 		EventType: e.Type,
 		Timestamp: time.Now().Unix(),
+		UserId:    e.UserID,
 	}
 
 	if e.StageName != "" {
@@ -93,6 +96,7 @@ func ProtoToEvent(pe *pb.TaskEvent) models.TaskEvent {
 	e := models.TaskEvent{
 		TaskID: pe.TaskId,
 		Type:   pe.EventType,
+		UserID: pe.UserId,
 	}
 
 	if pe.StageName != nil {

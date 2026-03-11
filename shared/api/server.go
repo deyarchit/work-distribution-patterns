@@ -41,7 +41,7 @@ func NewRouter(
 	e.GET("/tasks", ListTasks(manager))
 	e.GET("/tasks/:id", GetTask(manager))
 	e.GET("/events", SSEStream(hub))
-	e.GET("/", Index(tpl))
+	e.GET("/", Index(tpl, manager))
 
 	return e
 }

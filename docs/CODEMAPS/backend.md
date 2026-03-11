@@ -10,7 +10,7 @@
 | `shared/executor` | Stage runner; emits via `TaskConsumer` |
 | `shared/models` | `Task`, `Stage`, `TaskEvent`, `TaskStatus` |
 | `shared/events` | `TaskEventBridge` + `MemoryBridge`, `NATSBridge` |
-| `shared/sse` | SSE `Hub`, `Client` |
+| `shared/sse` | SSE `Hub` (routes by userID); `Client` (subscribes to remote `/events` endpoint) |
 | `shared/store` | `TaskStore` + `MemoryStore` |
 | `shared/templates` | Embedded HTMX |
 | `shared/testutil` | Test helpers + `RunSuite` runner |
@@ -28,7 +28,7 @@
 | POST | `/tasks` | Create task → `TaskManager.Submit` |
 | GET | `/tasks` | List → `TaskManager.List` |
 | GET | `/tasks/:id` | Get → `TaskManager.Get` |
-| GET | `/events` | SSE (scoped by `?taskID=`) |
+| GET | `/events` | SSE — user-scoped; identity from `user_id` cookie or `X-User-ID` header |
 | GET | `/health` | `200 ok` |
 | GET | `/` | HTMX page |
 | GET | `/ws/register` | P3 manager — WS registration |
@@ -46,39 +46,38 @@ type TaskManager interface {
     List(ctx context.Context) []models.Task
 }
 
-// contracts/dispatcher.go — manager-side transport view
+// contracts/dispatcher.go
 type TaskDispatcher interface {
     Start(ctx context.Context) error
     Dispatch(ctx context.Context, task models.Task) error
-    ReceiveEvent(ctx context.Context) (models.TaskEvent, error)  // blocks
+    ReceiveEvent(ctx context.Context) (models.TaskEvent, error)
 }
-var ErrDispatchFull = errors.New("dispatch queue full")   // → 429
-var ErrNoWorkers    = errors.New("no workers available")  // → 503
+var ErrDispatchFull = errors.New("dispatch queue full")  // → 429
+var ErrNoWorkers    = errors.New("no workers available") // → 503
 
-// contracts/consumer.go — worker-side transport view
+// contracts/consumer.go
 type TaskConsumer interface {
     Connect(ctx context.Context) error
-    Receive(ctx context.Context) (models.Task, error)            // blocks
+    Receive(ctx context.Context) (models.Task, error)
     Emit(ctx context.Context, event models.TaskEvent) error
 }
 
 // events/events.go
-type TaskEventPublisher interface { Publish(models.TaskEvent) }
+type TaskEventPublisher  interface { Publish(models.TaskEvent) }
 type TaskEventSubscriber interface { Subscribe(context.Context) (<-chan models.TaskEvent, error) }
-type TaskEventBridge interface { TaskEventPublisher; TaskEventSubscriber }
-
-// shared/api/server.go
-func NewRouter(hub *sse.Hub, tpl *template.Template, manager contracts.TaskManager) *echo.Echo
+type TaskEventBridge     interface { TaskEventPublisher; TaskEventSubscriber }
 
 // manager/manager.go
 func New(s store.TaskStore, d contracts.TaskDispatcher, evs events.TaskEventPublisher, deadline time.Duration) *Manager
-func (m *Manager) Start(ctx context.Context)   // non-blocking; launches runEventLoop + deadline goroutines
-func (m *Manager) Submit(ctx context.Context, task models.Task) error
-func (m *Manager) Get(_ context.Context, id string) (models.Task, bool)
-func (m *Manager) List(_ context.Context) []models.Task
+func (m *Manager) Start(ctx context.Context)
 
-// sse/client.go
-func (c *Client) Subscribe(ctx context.Context) (<-chan models.TaskEvent, error)
+// sse/hub.go — routes by userID; no global fan-out ⚠ API layer only
+func (h *Hub) Subscribe(userID string) (chan []byte, func())
+func (h *Hub) Publish(event models.TaskEvent)
+
+// shared/api/handlers.go
+// BridgeStream(bus TaskEventSubscriber) — cross-process relay for P2/P3 managers ⚠ not Hub
+// getUserID(c) — X-User-ID header → user_id cookie (minted by Index on first visit)
 ```
 
 ## Detailed References

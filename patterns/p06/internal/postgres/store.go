@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	id            TEXT        PRIMARY KEY,
 	name          TEXT        NOT NULL,
 	status        TEXT        NOT NULL,
+	user_id       TEXT        NOT NULL DEFAULT '',
 	stages        JSONB       NOT NULL,
 	submitted_at  TIMESTAMPTZ NOT NULL,
 	dispatched_at TIMESTAMPTZ,
@@ -41,9 +42,9 @@ func (s *Store) Create(task models.Task) error {
 		return err
 	}
 	_, err = s.pool.Exec(context.Background(),
-		`INSERT INTO tasks (id, name, status, stages, submitted_at, dispatched_at, completed_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		task.ID, task.Name, string(task.Status), stages,
+		`INSERT INTO tasks (id, name, status, user_id, stages, submitted_at, dispatched_at, completed_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		task.ID, task.Name, string(task.Status), task.UserID, stages,
 		task.SubmittedAt, task.DispatchedAt, task.CompletedAt,
 	)
 	return err
@@ -51,7 +52,7 @@ func (s *Store) Create(task models.Task) error {
 
 func (s *Store) Get(id string) (models.Task, bool) {
 	row := s.pool.QueryRow(context.Background(),
-		`SELECT id, name, status, stages, submitted_at, dispatched_at, completed_at
+		`SELECT id, name, status, user_id, stages, submitted_at, dispatched_at, completed_at
 		 FROM tasks WHERE id = $1`, id)
 	task, err := scanTask(row)
 	if err != nil {
@@ -62,7 +63,7 @@ func (s *Store) Get(id string) (models.Task, bool) {
 
 func (s *Store) List() []models.Task {
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT id, name, status, stages, submitted_at, dispatched_at, completed_at
+		`SELECT id, name, status, user_id, stages, submitted_at, dispatched_at, completed_at
 		 FROM tasks ORDER BY submitted_at`)
 	if err != nil {
 		return nil
@@ -109,7 +110,7 @@ func scanTask(s scanner) (models.Task, error) {
 	var status string
 	var stagesJSON string
 	if err := s.Scan(
-		&t.ID, &t.Name, &status, &stagesJSON,
+		&t.ID, &t.Name, &status, &t.UserID, &stagesJSON,
 		&t.SubmittedAt, &t.DispatchedAt, &t.CompletedAt,
 	); err != nil {
 		return models.Task{}, err

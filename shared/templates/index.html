@@ -197,7 +197,7 @@
           </div>
           <div class="form-group">
             <label for="stage_count">Stages (1–8)</label>
-            <input type="number" id="stage_count" name="stage_count" value="3" min="1" max="8">
+            <input type="number" id="stage_count" name="stage_count" value="8" min="1" max="8">
           </div>
           <button type="submit">Submit</button>
         </div>
@@ -209,49 +209,45 @@
       <span id="sse-status" class="connected">● Ready</span>
     </div>
     <div id="task-list">
-      <div class="empty-state">No tasks yet. Submit one above.</div>
+      {{if .}}
+        {{range .}}{{template "task-card" .}}{{end}}
+      {{else}}
+        <div class="empty-state">No tasks yet. Submit one above.</div>
+      {{end}}
     </div>
   </div>
 
   <script>
-    // ── Per-task SSE connections ──────────────────────────────────────────────
-    const taskConnections = new Map();
-
-    function openTaskSSE(taskID) {
-      if (taskConnections.has(taskID)) return;
-      const es = new EventSource('/events?taskID=' + encodeURIComponent(taskID));
-      es.onopen = () => updateSSEStatus(true);
-      es.onmessage = (e) => {
-        try {
-          const ev = JSON.parse(e.data);
-          if (ev.type === 'progress')     handleProgress(ev);
-          else if (ev.type === 'task_status') handleTaskStatus(ev);
-        } catch (err) { console.error('SSE parse error:', err); }
-      };
-      es.onerror = () => updateSSEStatus(taskConnections.size > 0);
-      taskConnections.set(taskID, es);
+    // ── Randomised task name ──────────────────────────────────────────────────
+    function setNextTaskName() {
+      const r = Math.floor(10000 + Math.random() * 90000);
+      document.getElementById('name').value = 'task-' + r;
     }
+    setNextTaskName();
+    document.querySelector('form').addEventListener('htmx:afterRequest', setNextTaskName);
 
-    function closeTaskSSE(taskID) {
-      const es = taskConnections.get(taskID);
-      if (!es) return;
-      es.close();
-      taskConnections.delete(taskID);
-      if (taskConnections.size > 0) {
-        updateSSEStatus(true);
-      } else {
-        // All tasks done — not an error, show ready
-        const el = document.getElementById('sse-status');
-        if (el) { el.textContent = '● Ready'; el.className = 'connected'; }
-      }
-    }
+    // ── Single user-scoped SSE connection ─────────────────────────────────────
+    // One EventSource per page; cookie is sent automatically by the browser.
+    // Events are demuxed to the right card by ev.taskID.
+    const userStream = new EventSource('/events');
 
-    function updateSSEStatus(connected) {
+    userStream.onopen = () => {
       const el = document.getElementById('sse-status');
-      if (!el) return;
-      el.textContent = connected ? '● Connected' : '● Disconnected';
-      el.className = connected ? 'connected' : 'disconnected';
-    }
+      if (el) { el.textContent = '● Connected'; el.className = 'connected'; }
+    };
+
+    userStream.onerror = () => {
+      const el = document.getElementById('sse-status');
+      if (el) { el.textContent = '● Disconnected'; el.className = 'disconnected'; }
+    };
+
+    userStream.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === 'progress')          handleProgress(ev);
+        else if (ev.type === 'task_status')  handleTaskStatus(ev);
+      } catch (err) { console.error('SSE parse error:', err); }
+    };
 
     // ── SSE handlers — UPDATE ONLY, never create cards ───────────────────────
     // Cards are created exclusively by HTMX from the POST /tasks response.
@@ -261,6 +257,8 @@
     function handleProgress(ev) {
       const card = document.getElementById('task-' + ev.taskID);
       if (!card) return;
+      const progress = card.querySelector('.task-progress');
+      if (progress) progress.style.display = '';
       const bar = card.querySelector('.task-progress-bar');
       if (bar) bar.style.width = ev.progress + '%';
       const label = card.querySelector('.stage-label');
@@ -273,24 +271,21 @@
       card.className = 'task-card ' + ev.status;
       const badge = card.querySelector('.badge');
       if (badge) { badge.className = 'badge ' + ev.status; badge.textContent = ev.status; }
-      if (ev.status === 'completed') {
-        const bar = card.querySelector('.task-progress-bar');
-        if (bar) bar.style.width = '100%';
+      if (ev.status === 'completed' || ev.status === 'failed') {
+        const progress = card.querySelector('.task-progress');
+        if (progress) progress.style.display = 'none';
         const label = card.querySelector('.stage-label');
         if (label) label.textContent = '';
       }
-      if (ev.status === 'completed' || ev.status === 'failed') {
-        closeTaskSSE(ev.taskID);
-      }
     }
 
-    // ── After HTMX inserts a card, open a scoped SSE connection ──────────────
+    // ── After HTMX inserts a card, sync current state from server ────────────
+    // Catches events that arrived before the card was in the DOM.
     document.body.addEventListener('htmx:afterSwap', function(evt) {
       if (!evt.detail.target || evt.detail.target.id !== 'task-list') return;
       const first = evt.detail.target.firstElementChild;
       if (!first || !first.id.startsWith('task-')) return;
       const taskID = first.id.replace('task-', '');
-      openTaskSSE(taskID);
       syncCardState(taskID);
     });
 
@@ -304,12 +299,8 @@
           card.className = 'task-card ' + task.status;
           const badge = card.querySelector('.badge');
           if (badge) { badge.className = 'badge ' + task.status; badge.textContent = task.status; }
-          if (task.status === 'completed' || task.status === 'failed') {
-            closeTaskSSE(taskID);
-          }
         });
     }
-    // No connectSSE() call — connections are opened per-task via htmx:afterSwap
   </script>
 </body>
 </html>
@@ -324,7 +315,7 @@
     </div>
     <span class="badge {{.Status}}">{{.Status}}</span>
   </div>
-  <div class="task-progress">
+  <div class="task-progress" style="display:none">
     <div class="task-progress-bar" style="width: 0%"></div>
   </div>
   <div class="stage-label"></div>

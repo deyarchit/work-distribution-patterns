@@ -25,6 +25,8 @@ Seven patterns demonstrating different work distribution topologies and deployme
 - **API uses `TaskManager` abstraction** — ⚠ never direct store access.
 - **Tests: `WaitForWorker` waits for completion** — ⚠ worker idle before suite.
 - **P7: zero hardcoded broker config** — ⚠ all discovery via bootstrap handshake.
+- **SSE Hub is user-facing only** — Hub routes events by userID; only API layer subscribes to it. ⚠ Manager processes must not use Hub; use `BridgeStream` (subscribes to MemoryBridge directly) for cross-process relay.
+- **UserID stamped at manager enrichment** — `runEventLoop` looks up `task.UserID` from store and sets `event.UserID` before publishing. ⚠ All transports (Postgres, gRPC proto) must persist/carry `UserID` or enrichment produces empty string and SSE routing fails.
 
 ## Process Topology
 

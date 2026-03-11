@@ -21,20 +21,21 @@
 
 - Form POST triggers `SubmitTask` handler (detects `HX-Request: true`)
 - Response is the `task-card` template fragment, prepended to `#task-list`
-- `htmx:afterSwap` triggers `openTaskSSE(taskID)` and `syncCardState(taskID)`
+- `htmx:afterSwap` triggers `syncCardState(taskID)`
 
 ## SSE Event Flow
 
-`GET /events?taskID=<id>` → per-task `EventSource` (stored in `taskConnections` Map)
+`GET /events` → single user-scoped `EventSource` opened at page load (browser sends `user_id` cookie automatically); client demuxes by `taskID`.
 
 | Event type | Payload fields | Handler | DOM effect |
 |------------|---------------|---------|------------|
-| `stage_progress` | taskID, stageIdx, stageName, progress, status | `handleStageProgress()` | `.stage-dot` class, `.stage-progress-fill` width, `.stage-pct` text; `updateOverallProgress()` |
-| `task_status` | taskID, status | `handleTaskStatus()` | `.task-card` class + `.badge` text/class; `closeTaskSSE(taskID)` on terminal status |
+| `progress` | taskID, stageIdx, stageName, progress, status | `handleProgress()` | `.stage-dot` class, `.stage-progress-fill` width, `.stage-pct` text; `updateOverallProgress()` |
+| `task_status` | taskID, status | `handleTaskStatus()` | `.task-card` class + `.badge` text/class |
 
-- One `EventSource` per active task; closed on `completed` or `failed`
+- Single `EventSource` per browser session (not per task); never explicitly closed
 - `syncCardState(taskID)` fetches `GET /tasks/:id` on card insertion to catch missed events
 - Heartbeat: server sends `: heartbeat\n\n` every 15 s to keep connections alive
+- UserID identity: `user_id` UUID cookie minted by `Index` handler on first visit; shared across tabs in same browser
 
 ## Card DOM Structure
 
