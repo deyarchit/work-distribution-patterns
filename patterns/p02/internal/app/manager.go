@@ -69,7 +69,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
 	e.GET("/events", api.BridgeStream(bus))
-	e.GET("/", api.Index(tpl))
+	e.GET("/", api.Index(tpl, mgr))
 
 	e.GET("/work/next", dispatcher.HandleNext)
 	e.POST("/work/events", dispatcher.HandleEvent)

@@ -131,19 +131,31 @@ func SSEStream(hub *sse.Hub) echo.HandlerFunc {
 
 // Index handles GET / — serves the HTMX frontend.
 // Mints a user_id cookie on first visit so the browser has a stable identity
-// for task submission and SSE subscription.
-func Index(tpl *template.Template) echo.HandlerFunc {
+// for task submission and SSE subscription. Pre-populates the task list with
+// any existing tasks belonging to this user so new tabs show prior work.
+func Index(tpl *template.Template, manager contracts.TaskManager) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if _, err := c.Cookie("user_id"); err != nil {
+		userID := getUserID(c)
+		if userID == "" {
+			userID = uuid.New().String()
 			c.SetCookie(&http.Cookie{
 				Name:     "user_id",
-				Value:    uuid.New().String(),
+				Value:    userID,
 				Path:     "/",
 				SameSite: http.SameSiteLaxMode,
 			})
 		}
+
+		all := manager.List(c.Request().Context())
+		var tasks []models.Task
+		for _, t := range all {
+			if t.UserID == userID {
+				tasks = append(tasks, t)
+			}
+		}
+
 		c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
-		return tpl.ExecuteTemplate(c.Response().Writer, "index.html", nil)
+		return tpl.ExecuteTemplate(c.Response().Writer, "index.html", tasks)
 	}
 }
 
