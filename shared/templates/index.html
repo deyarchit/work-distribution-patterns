@@ -197,7 +197,7 @@
           </div>
           <div class="form-group">
             <label for="stage_count">Stages (1–8)</label>
-            <input type="number" id="stage_count" name="stage_count" value="3" min="1" max="8">
+            <input type="number" id="stage_count" name="stage_count" value="8" min="1" max="8">
           </div>
           <button type="submit">Submit</button>
         </div>
@@ -214,6 +214,14 @@
   </div>
 
   <script>
+    // ── Randomised task name ──────────────────────────────────────────────────
+    function setNextTaskName() {
+      const r = Math.floor(10000 + Math.random() * 90000);
+      document.getElementById('name').value = 'task-' + r;
+    }
+    setNextTaskName();
+    document.querySelector('form').addEventListener('htmx:afterRequest', setNextTaskName);
+
     // ── Single user-scoped SSE connection ─────────────────────────────────────
     // One EventSource per page; cookie is sent automatically by the browser.
     // Events are demuxed to the right card by ev.taskID.
