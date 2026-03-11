@@ -19,7 +19,7 @@ Use `make test` as inner loop; builds coverage report.
 
 **Setup**: Start infra → Manager → Worker(s) → API → `WaitReady` + `WaitForWorker` → `RunSuite`.
 
-**RunSuite subtests**: `SingleTask` (verify task lifecycle), `ConcurrentTasks` (3 parallel), `StatusTransitions` (SSE sequence + final state).
+**RunSuite subtests**: `SingleTask`, `ConcurrentTasks` (3 parallel), `StatusTransitions`. All share `suiteUserID` constant for `PostTask`/`SSEClient`.
 
 ## Test Infrastructure
 
@@ -40,8 +40,8 @@ P5/P6 use `testcontainers-go`: `tcnats.Run`, `tcpostgres.Run` with `BasicWaitStr
 | Function | Signature | Purpose |
 |----------|-----------|---------|
 | `RunSuite` | `(t, baseURL string)` | Runs SingleTask, ConcurrentTasks, StatusTransitions |
-| `SSEClient` | `(ctx, t, baseURL, taskID string) <-chan SSEEvent` | Connect to `/events`; buffered (256) |
-| `PostTask` | `(t, baseURL, name string, stageCount int) string` | POST /tasks; returns task ID |
+| `SSEClient` | `(ctx, t, baseURL, userID string) <-chan SSEEvent` | Connect to `/events` with `X-User-ID` header; buffered (256) |
+| `PostTask` | `(t, baseURL, userID, name string, stageCount int) string` | POST /tasks with `X-User-ID` header; returns task ID |
 | `GetTask`, `ListTasks` | HTTP helpers | GET /tasks/:id, GET /tasks |
 | `WaitReady` | `(t, baseURL string)` | Poll /health until 200 (10 s timeout) |
 | `WaitForWorker` | `(t, baseURL string)` | Submit probe task, wait for completion (5 s accept + 10 s complete) — ⚠ critical for async registration |

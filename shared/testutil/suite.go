@@ -9,6 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// suiteUserID is the stable user identity used across all suite subtests.
+// All tasks are submitted under this ID and the SSE stream is scoped to it.
+const suiteUserID = "suite-test-user"
+
 // RunSuite runs the standard set of integration tests against baseURL.
 // It is intended to be called from pattern-specific integration test files.
 func RunSuite(t *testing.T, baseURL string) {
@@ -33,10 +37,10 @@ func testSingleTask(t *testing.T, baseURL string) {
 
 	const stageCount = 3
 
-	events := SSEClient(ctx, t, baseURL, "")
-	t.Log("SSE connected (global stream)")
+	events := SSEClient(ctx, t, baseURL, suiteUserID)
+	t.Log("SSE connected (user-scoped stream)")
 
-	id := PostTask(t, baseURL, "integration-single", stageCount)
+	id := PostTask(t, baseURL, suiteUserID, "integration-single", stageCount)
 	t.Logf("submitted task %s", id)
 
 	collected := CollectEventsUntilQuiet(ctx, t, events, []string{id}, 1*time.Second)
@@ -57,12 +61,12 @@ func testConcurrentTasks(t *testing.T, baseURL string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	events := SSEClient(ctx, t, baseURL, "")
-	t.Log("SSE connected (global stream)")
+	events := SSEClient(ctx, t, baseURL, suiteUserID)
+	t.Log("SSE connected (user-scoped stream)")
 
 	ids := make([]string, numTasks)
 	for i := range ids {
-		ids[i] = PostTask(t, baseURL, "integration-concurrent", stageCount)
+		ids[i] = PostTask(t, baseURL, suiteUserID, "integration-concurrent", stageCount)
 	}
 	t.Logf("submitted %d tasks: %v", numTasks, ids)
 
@@ -87,10 +91,10 @@ func testStatusTransitions(t *testing.T, baseURL string) {
 
 	const stageCount = 2
 
-	events := SSEClient(ctx, t, baseURL, "")
-	t.Log("SSE connected (global stream)")
+	events := SSEClient(ctx, t, baseURL, suiteUserID)
+	t.Log("SSE connected (user-scoped stream)")
 
-	id := PostTask(t, baseURL, "integration-transitions", stageCount)
+	id := PostTask(t, baseURL, suiteUserID, "integration-transitions", stageCount)
 	t.Logf("submitted task %s", id)
 
 	task := GetTask(t, baseURL, id)

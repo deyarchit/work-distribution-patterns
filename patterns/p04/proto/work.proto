@@ -20,6 +20,7 @@ message Task {
   repeated Stage stages = 4;
   int64 created_at = 5;
   int64 updated_at = 6;
+  string user_id = 7;
 }
 
 // TaskEvent represents a status update or progress event
@@ -31,6 +32,7 @@ message TaskEvent {
   optional int32 progress = 5;
   optional string error = 6;
   int64 timestamp = 7;
+  string user_id = 8;
 }
 
 // Request/Response messages for TaskManager service (API -> Manager)

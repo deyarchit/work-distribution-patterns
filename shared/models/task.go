@@ -64,6 +64,7 @@ const (
 type TaskEvent struct {
 	Type      string `json:"type"`
 	TaskID    string `json:"taskID"`
+	UserID    string `json:"userID,omitempty"`    // populated by manager before publishing
 	StageName string `json:"stageName,omitempty"` // EventProgress only
 	Progress  int    `json:"progress,omitempty"`  // 0–100, EventProgress only
 	Status    string `json:"status,omitempty"`    // EventTaskStatus only
@@ -73,6 +74,7 @@ type Task struct {
 	ID           string     `json:"id"`
 	Name         string     `json:"name"`
 	Status       TaskStatus `json:"status"`
+	UserID       string     `json:"userID,omitempty"`
 	SubmittedAt  time.Time  `json:"submittedAt"`
 	DispatchedAt *time.Time `json:"dispatchedAt,omitempty"`
 	CompletedAt  *time.Time `json:"completedAt,omitempty"`

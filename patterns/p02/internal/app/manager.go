@@ -10,7 +10,6 @@ import (
 	"work-distribution-patterns/shared/events"
 	"work-distribution-patterns/shared/manager"
 	"work-distribution-patterns/shared/models"
-	"work-distribution-patterns/shared/sse"
 	"work-distribution-patterns/shared/store"
 	"work-distribution-patterns/shared/templates"
 
@@ -29,20 +28,9 @@ type ManagerConfig struct {
 func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 	taskStore := store.NewMemoryStore()
 	bus := events.NewMemoryBridge()
-	hub := sse.NewHub()
 	dispatcher := restinternal.NewRESTDispatcher(cfg.WorkersQueueSize)
 	mgr := manager.New(taskStore, dispatcher, bus, 0)
 	mgr.Start(ctx)
-
-	ch, err := bus.Subscribe(ctx)
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		for ev := range ch {
-			hub.Publish(ev)
-		}
-	}()
 
 	tpl, err := template.ParseFS(templates.FS, "index.html")
 	if err != nil {
@@ -80,7 +68,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*echo.Echo, error) {
 
 	e.GET("/tasks", api.ListTasks(mgr))
 	e.GET("/tasks/:id", api.GetTask(mgr))
-	e.GET("/events", api.SSEStream(hub))
+	e.GET("/events", api.BridgeStream(bus))
 	e.GET("/", api.Index(tpl))
 
 	e.GET("/work/next", dispatcher.HandleNext)

@@ -214,44 +214,28 @@
   </div>
 
   <script>
-    // ── Per-task SSE connections ──────────────────────────────────────────────
-    const taskConnections = new Map();
+    // ── Single user-scoped SSE connection ─────────────────────────────────────
+    // One EventSource per page; cookie is sent automatically by the browser.
+    // Events are demuxed to the right card by ev.taskID.
+    const userStream = new EventSource('/events');
 
-    function openTaskSSE(taskID) {
-      if (taskConnections.has(taskID)) return;
-      const es = new EventSource('/events?taskID=' + encodeURIComponent(taskID));
-      es.onopen = () => updateSSEStatus(true);
-      es.onmessage = (e) => {
-        try {
-          const ev = JSON.parse(e.data);
-          if (ev.type === 'progress')     handleProgress(ev);
-          else if (ev.type === 'task_status') handleTaskStatus(ev);
-        } catch (err) { console.error('SSE parse error:', err); }
-      };
-      es.onerror = () => updateSSEStatus(taskConnections.size > 0);
-      taskConnections.set(taskID, es);
-    }
-
-    function closeTaskSSE(taskID) {
-      const es = taskConnections.get(taskID);
-      if (!es) return;
-      es.close();
-      taskConnections.delete(taskID);
-      if (taskConnections.size > 0) {
-        updateSSEStatus(true);
-      } else {
-        // All tasks done — not an error, show ready
-        const el = document.getElementById('sse-status');
-        if (el) { el.textContent = '● Ready'; el.className = 'connected'; }
-      }
-    }
-
-    function updateSSEStatus(connected) {
+    userStream.onopen = () => {
       const el = document.getElementById('sse-status');
-      if (!el) return;
-      el.textContent = connected ? '● Connected' : '● Disconnected';
-      el.className = connected ? 'connected' : 'disconnected';
-    }
+      if (el) { el.textContent = '● Connected'; el.className = 'connected'; }
+    };
+
+    userStream.onerror = () => {
+      const el = document.getElementById('sse-status');
+      if (el) { el.textContent = '● Disconnected'; el.className = 'disconnected'; }
+    };
+
+    userStream.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === 'progress')          handleProgress(ev);
+        else if (ev.type === 'task_status')  handleTaskStatus(ev);
+      } catch (err) { console.error('SSE parse error:', err); }
+    };
 
     // ── SSE handlers — UPDATE ONLY, never create cards ───────────────────────
     // Cards are created exclusively by HTMX from the POST /tasks response.
@@ -279,18 +263,15 @@
         const label = card.querySelector('.stage-label');
         if (label) label.textContent = '';
       }
-      if (ev.status === 'completed' || ev.status === 'failed') {
-        closeTaskSSE(ev.taskID);
-      }
     }
 
-    // ── After HTMX inserts a card, open a scoped SSE connection ──────────────
+    // ── After HTMX inserts a card, sync current state from server ────────────
+    // Catches events that arrived before the card was in the DOM.
     document.body.addEventListener('htmx:afterSwap', function(evt) {
       if (!evt.detail.target || evt.detail.target.id !== 'task-list') return;
       const first = evt.detail.target.firstElementChild;
       if (!first || !first.id.startsWith('task-')) return;
       const taskID = first.id.replace('task-', '');
-      openTaskSSE(taskID);
       syncCardState(taskID);
     });
 
@@ -304,12 +285,8 @@
           card.className = 'task-card ' + task.status;
           const badge = card.querySelector('.badge');
           if (badge) { badge.className = 'badge ' + task.status; badge.textContent = task.status; }
-          if (task.status === 'completed' || task.status === 'failed') {
-            closeTaskSSE(taskID);
-          }
         });
     }
-    // No connectSSE() call — connections are opened per-task via htmx:afterSwap
   </script>
 </body>
 </html>

@@ -99,6 +99,7 @@ type Task struct {
 	Stages        []*Stage               `protobuf:"bytes,4,rep,name=stages,proto3" json:"stages,omitempty"`
 	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     int64                  `protobuf:"varint,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	UserId        string                 `protobuf:"bytes,7,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -175,6 +176,13 @@ func (x *Task) GetUpdatedAt() int64 {
 	return 0
 }
 
+func (x *Task) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 // TaskEvent represents a status update or progress event
 type TaskEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -185,6 +193,7 @@ type TaskEvent struct {
 	Progress      *int32                 `protobuf:"varint,5,opt,name=progress,proto3,oneof" json:"progress,omitempty"`
 	Error         *string                `protobuf:"bytes,6,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	Timestamp     int64                  `protobuf:"varint,7,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	UserId        string                 `protobuf:"bytes,8,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -266,6 +275,13 @@ func (x *TaskEvent) GetTimestamp() int64 {
 		return x.Timestamp
 	}
 	return 0
+}
+
+func (x *TaskEvent) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
 }
 
 // Request/Response messages for TaskManager service (API -> Manager)
@@ -580,7 +596,7 @@ const file_patterns_p04_proto_work_proto_rawDesc = "" +
 	"durationMs\x12\x16\n" +
 	"\x06status\x18\x03 \x01(\tR\x06status\x12\x19\n" +
 	"\x05error\x18\x04 \x01(\tH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\xa7\x01\n" +
+	"\x06_error\"\xc0\x01\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x16\n" +
@@ -589,7 +605,8 @@ const file_patterns_p04_proto_work_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\x03R\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\"\xff\x01\n" +
+	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\x12\x17\n" +
+	"\auser_id\x18\a \x01(\tR\x06userId\"\x98\x02\n" +
 	"\tTaskEvent\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -599,7 +616,8 @@ const file_patterns_p04_proto_work_proto_rawDesc = "" +
 	"stage_name\x18\x04 \x01(\tH\x00R\tstageName\x88\x01\x01\x12\x1f\n" +
 	"\bprogress\x18\x05 \x01(\x05H\x01R\bprogress\x88\x01\x01\x12\x19\n" +
 	"\x05error\x18\x06 \x01(\tH\x02R\x05error\x88\x01\x01\x12\x1c\n" +
-	"\ttimestamp\x18\a \x01(\x03R\ttimestampB\r\n" +
+	"\ttimestamp\x18\a \x01(\x03R\ttimestamp\x12\x17\n" +
+	"\auser_id\x18\b \x01(\tR\x06userIdB\r\n" +
 	"\v_stage_nameB\v\n" +
 	"\t_progressB\b\n" +
 	"\x06_error\"/\n" +

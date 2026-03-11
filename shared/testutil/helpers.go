@@ -54,23 +54,20 @@ type CollectedEvents struct {
 }
 
 // SSEClient connects to the /events endpoint and emits parsed events on a channel.
-// If taskID is non-empty, connects to /events?taskID=<taskID> for scoped delivery.
-// If taskID is empty, connects to /events for global delivery (all tasks).
+// Subscribes to the user-scoped stream for userID (sent as X-User-ID header).
 // Returns when ctx is cancelled or the connection drops.
-func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan SSEEvent {
+func SSEClient(ctx context.Context, t *testing.T, baseURL, userID string) <-chan SSEEvent {
 	t.Helper()
 	ch := make(chan SSEEvent, 256)
 
-	url := baseURL + "/events"
-	if taskID != "" {
-		url += "?taskID=" + taskID
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/events", nil)
 	if err != nil {
 		t.Logf("SSE new request: %v", err)
 		close(ch)
 		return ch
 	}
+	req.Header.Set("X-User-ID", userID)
+
 	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in goroutine below or explicit error path
 	if err != nil {
 		t.Logf("SSE connect error: %v", err)
@@ -110,8 +107,8 @@ func SSEClient(ctx context.Context, t *testing.T, baseURL, taskID string) <-chan
 	return ch
 }
 
-// PostTask submits a task and returns its ID.
-func PostTask(t *testing.T, baseURL, name string, stageCount int) string {
+// PostTask submits a task as userID and returns its ID.
+func PostTask(t *testing.T, baseURL, userID, name string, stageCount int) string {
 	t.Helper()
 	body, err := json.Marshal(SubmitRequest{
 		Name:       name,
@@ -120,7 +117,13 @@ func PostTask(t *testing.T, baseURL, name string, stageCount int) string {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body)))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/tasks", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", userID)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /tasks: %v", err)
 	}
@@ -205,7 +208,14 @@ func WaitForWorker(t *testing.T, baseURL string) {
 		if marshalErr != nil {
 			t.Fatalf("marshal probe: %v", marshalErr)
 		}
-		resp, err := http.Post(baseURL+"/tasks", "application/json", strings.NewReader(string(body)))
+		req, err := http.NewRequest(http.MethodPost, baseURL+"/tasks", strings.NewReader(string(body)))
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", "probe-worker")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
