@@ -40,7 +40,7 @@ run-p5:
 stop-p5:
 	docker compose -f patterns/p05/docker-compose.yml down -v
 
-## Run Pattern 6 with Docker Compose (1 manager + 3 APIs + 3 workers + broker + nginx)
+## Run Pattern 6 with Docker Compose (3 managers + 3 APIs + 3 workers + broker + nginx)
 ## Use BROKER=nats (default) or BROKER=kafka
 BROKER ?= nats
 run-p6:
@@ -50,6 +50,16 @@ run-p6:
 stop-p6:
 	@echo "Stopping Pattern 6 with broker: $(BROKER)"
 	docker compose -p p06-$(BROKER) -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.$(BROKER).yml down -v
+
+## Run Pattern 7 with Docker Compose (3 managers + 3 APIs + 3 workers + broker + nginx + mTLS bootstrap)
+## Use BROKER=nats (default), BROKER=kafka, or BROKER=aws
+run-p7:
+	@echo "Starting Pattern 7 with broker: $(BROKER)"
+	docker compose -p p07-$(BROKER) -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.$(BROKER).yml up --build
+
+stop-p7:
+	@echo "Stopping Pattern 7 with broker: $(BROKER)"
+	docker compose -p p07-$(BROKER) -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.$(BROKER).yml down -v
 
 ## Run in-process integration tests for all patterns (generates cover.out + cover.html)
 test:
@@ -88,7 +98,7 @@ build-all:
 
 ## Build all binaries and validate all six patterns end-to-end via Docker Compose
 test-integration: build-all
-	@echo "==> [1/6] Pattern 1: Local-Channels"
+	@echo "==> [1/10] Pattern 1: Local-Channels"
 	@{ \
 	  ./bin/p1-server & \
 	  until curl -sf http://localhost:8080/tasks > /dev/null 2>&1; do sleep 1; done; \
@@ -96,7 +106,7 @@ test-integration: build-all
 	  pkill -f "bin/p1-server" 2>/dev/null || true; \
 	  exit $$RC; \
 	}
-	@echo "==> [2/6] Pattern 2: Pull-REST"
+	@echo "==> [2/10] Pattern 2: Pull-REST"
 	@echo "    Building containers..."
 	@{ \
 	  docker compose -f patterns/p02/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
@@ -105,7 +115,7 @@ test-integration: build-all
 	  docker compose -f patterns/p02/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [3/6] Pattern 3: Push-WebSocket"
+	@echo "==> [3/10] Pattern 3: Push-WebSocket"
 	@echo "    Building containers..."
 	@{ \
 	  docker compose -f patterns/p03/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
@@ -114,7 +124,7 @@ test-integration: build-all
 	  docker compose -f patterns/p03/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [4/6] Pattern 4: Streaming-gRPC"
+	@echo "==> [4/10] Pattern 4: Streaming-gRPC"
 	@echo "    Building containers..."
 	@{ \
 	  docker compose -f patterns/p04/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
@@ -123,7 +133,7 @@ test-integration: build-all
 	  docker compose -f patterns/p04/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [5/6] Pattern 5: Brokered-NATS"
+	@echo "==> [5/10] Pattern 5: Brokered-NATS"
 	@echo "    Building containers..."
 	@{ \
 	  docker compose -f patterns/p05/docker-compose.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
@@ -132,7 +142,7 @@ test-integration: build-all
 	  docker compose -f patterns/p05/docker-compose.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [6/7] Pattern 6: Cloud-Agnostic (NATS)"
+	@echo "==> [6/10] Pattern 6: Cloud-Agnostic (NATS)"
 	@echo "    Building containers..."
 	@{ \
 	  docker compose -p p06-nats -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
@@ -141,13 +151,40 @@ test-integration: build-all
 	  docker compose -p p06-nats -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.nats.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
-	@echo "==> [7/7] Pattern 6: Cloud-Agnostic (Kafka)"
+	@echo "==> [7/10] Pattern 6: Cloud-Agnostic (Kafka)"
 	@echo "    Building containers..."
 	@{ \
 	  docker compose -p p06-kafka -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
 	  rm .docker_build.log; \
 	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
 	  docker compose -p p06-kafka -f patterns/p06/docker-compose.base.yml -f patterns/p06/docker-compose.kafka.yml down -v > /dev/null 2>&1; \
+	  exit $$RC; \
+	}
+	@echo "==> [8/10] Pattern 7: Bootstrap-Driven Edge Worker (NATS)"
+	@echo "    Building containers..."
+	@{ \
+	  docker compose -p p07-nats -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.nats.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -p p07-nats -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.nats.yml down -v > /dev/null 2>&1; \
+	  exit $$RC; \
+	}
+	@echo "==> [9/10] Pattern 7: Bootstrap-Driven Edge Worker (Kafka)"
+	@echo "    Building containers..."
+	@{ \
+	  docker compose -p p07-kafka -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.kafka.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -p p07-kafka -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.kafka.yml down -v > /dev/null 2>&1; \
+	  exit $$RC; \
+	}
+	@echo "==> [10/10] Pattern 7: Bootstrap-Driven Edge Worker (AWS)"
+	@echo "    Building containers..."
+	@{ \
+	  docker compose -p p07-aws -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.aws.yml up --build -d --wait --quiet-pull > .docker_build.log 2>&1 || { cat .docker_build.log; rm .docker_build.log; exit 1; }; \
+	  rm .docker_build.log; \
+	  BASE_URL=$(BASE_URL) $(MAKE) test-e2e; RC=$$?; \
+	  docker compose -p p07-aws -f patterns/p07/docker-compose.base.yml -f patterns/p07/docker-compose.aws.yml down -v > /dev/null 2>&1; \
 	  exit $$RC; \
 	}
 
