@@ -51,7 +51,7 @@ All env loading uses `envconfig.Process("", &cfg)` with `default:` tags.
 | P4 | `[api]`, `[manager]` (HTTP + gRPC), `[worker×3]` | gRPC bidirectional streams |
 | P5 | `[nginx]` → `[api×3]`, `[manager×3]`, `[worker×3]`, `[nats]`, `[postgres]` | NATS queue group ensures one manager per event; ⚠ nats.conf required |
 | P6 | `[nginx]` → `[api×3]`, `[manager×3]`, `[worker×3]`, `[broker]`, `[postgres]` | Broker-agnostic gocloud; broker consumer groups; `BROKER=nats\|kafka\|aws` |
-| P7 | `[api]`, `[manager]` (HTTP:8081 + mTLS:8083), `[worker×3]` | Worker bootstrap; discovers broker + token; mTLS device certs |
+| P7 | `[nginx]` → `[api×3]`, `[manager×3]` (HTTP:8081 + mTLS:8083), `[worker×3]`, `[nats]`, `[postgres]`, `[certs-init]` | Worker bootstrap; mTLS device certs; discovers broker + token |
 
 P5: nats-jetstream volume; P6–P7: postgres ephemeral.
 

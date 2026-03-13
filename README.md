@@ -56,7 +56,7 @@ All patterns expose an **identical HTTP API** and **identical HTMX frontend**. T
 | **p04: Streaming-gRPC** | 1 API + 1 Manager + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gRPC bidirectional stream | gRPC bidirectional stream | API subscribes to Manager `GET /events` (`BridgeStream` → `MemoryBridge`) |
 | **p05: Brokered-NATS** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | NATS JetStream `tasks.new` | NATS `worker.events.*` (queue group) | `NATSBridge` (fan-out to all APIs) |
 | **p06: Cloud-PubSub** | N APIs + N managers + N workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to all APIs) |
-| **p07: Bootstrap-mTLS** | 1 API + 1 Manager (HTTP + mTLS) + N edge workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic (URL discovered at runtime) | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to API) |
+| **p07: Bootstrap-mTLS** | N APIs + N managers (HTTP + mTLS) + N edge workers | HTTP · SSE | HTTP (`RemoteTaskManager`) | gocloud pubsub TASKS topic (URL discovered at runtime) | gocloud pubsub EVENTS topic | `CloudBridge` (fan-out to all APIs) |
 
 ## Pattern Diagrams
 
@@ -215,7 +215,7 @@ graph LR
 
 All patterns require:
 - **Go 1.25+**
-- **Docker** and **Docker Compose** (for patterns 2–6; P7 integration test uses testcontainers)
+- **Docker** and **Docker Compose** (for patterns 2–7)
 
 > **Note:** Pattern 4 uses gRPC, but the generated protobuf code is **already checked into the repository** (`patterns/p04/proto/*.pb.go`). You do **not** need to install protoc or any code generators unless you plan to modify the `.proto` file itself.
 
@@ -309,21 +309,30 @@ make run-p6 BROKER=aws
 # open http://localhost:8080
 ```
 
-### Pattern 7: Bootstrap-mTLS (integration test)
+### Pattern 7: Bootstrap-mTLS (Docker)
 
-P7 does not have a Docker Compose deployment yet — the full end-to-end flow is covered by the in-process integration test, which generates ephemeral PKI material, spins up NATS and Postgres via testcontainers, and exercises the bootstrap handshake, revocation, and token renewal:
+Same horizontally scaled topology as P6 (N APIs, N managers, N workers + nginx), with two additions: each manager replica runs a second **mTLS listener** (`:8083`) for worker bootstrap, and a `certs-init` container generates the CA, server certificate, and worker device certificate at startup.
+
+Supports the same three brokers as P6:
+
+```bash
+# NATS JetStream (default)
+make run-p7 BROKER=nats
+
+# Kafka
+make run-p7 BROKER=kafka
+
+# AWS SNS/SQS (via LocalStack)
+make run-p7 BROKER=aws
+
+# open http://localhost:8080
+```
+
+The in-process integration test exercises the full bootstrap handshake, revocation, and token renewal with ephemeral PKI (no Docker required):
 
 ```bash
 go test ./patterns/p07/... -v -run TestP7Integration
 ```
-
-The three binaries (`p07-manager`, `p07-worker`, `p07-api`) are fully wired and deployable; they read TLS configuration from environment variables and cert files:
-
-| Binary | Key env vars |
-|---|---|
-| `p07-manager` | `BOOTSTRAP_ADDR`, `SERVER_CERT_PATH`, `SERVER_KEY_PATH`, `CA_CERT_PATH`, `TOKEN_SECRET`, `TOKEN_TTL_MINS` |
-| `p07-worker` | `MANAGER_URL` (bootstrap URL), `CERT_PATH`, `KEY_PATH`, `CA_CERT_PATH` |
-| `p07-api` | `MANAGER_URL`, `BROKER_URL` |
 
 ## Testing
 
