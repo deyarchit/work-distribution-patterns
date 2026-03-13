@@ -39,10 +39,10 @@ Three invariant layers with fixed responsibilities. Only the transport between M
 
 **Invariants that hold across all patterns:**
 - The client never talks to the Manager or Worker directly — only to the API.
+- The API layer only communicates with the Manager.
 - The API submit is synchronous: the Manager must acknowledge before the API responds to the client.
 - The Manager does not wait for a worker to pick up a task. Dispatch is fire-and-forget.
-- The Manager always republishes worker events before the API layer delivers them to the client (ensures state is consistent before SSE reaches the browser).
-- User identity flows from the client: a UUID cookie (minted on first visit) for browsers, or an `X-User-ID` header for API clients. The Manager stamps this ID onto every outbound event so the SSE layer can route to the correct subscriber.
+- The Manager captures events from the Worker, persists non-progress events, and republishes events to the API layer for delivery to the client. This ensures state is consistent before SSE reaches the browser.
 
 ## Patterns
 
